@@ -152,7 +152,7 @@ function registerServiceWorker() {
     location.reload();
   });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.v4.js').catch(() => {
+    navigator.serviceWorker.register('./sw.v5.js').catch(() => {
       showToast('离线缓存未启用');
     });
   });
