@@ -139,7 +139,7 @@ function registerServiceWorker() {
   if (!/^https?:$/.test(location.protocol)) return;
   if (!('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => {
+    navigator.serviceWorker.register('./sw.v2.js').catch(() => {
       showToast('离线缓存未启用');
     });
   });
