@@ -1,7 +1,7 @@
 'use strict';
 
 // 经典脚本：不使用 import/export，避免在无构建的项目里引入模块边界。
-const CACHE = 'papercut-v1';
+const CACHE = 'papercut-v2';
 const ENTRY = './index.html';
 
 // 与 index.html 的引用（含其 import 图）逐一对应；部署在 /papercut-web/ 子路径下，全部相对。

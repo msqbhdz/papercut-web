@@ -3,27 +3,27 @@ import { exportPNG, exportSVG } from './export.js';
 
 const MIN_WIDTH = 0.004;
 const MAX_WIDTH = 0.02;
-const DEFAULT_FOLDS = 8;
-const DEFAULT_COLOR = '#c8102e';
+const DEFAULT_FOLDS = 6;
 const PNG_SIZE = 2048;
 const SVG_SIZE = 1024;
 const TOAST_MS = 2200;
 
 const canvas = document.querySelector('#board');
 const foldGroup = document.querySelector('#foldGroup');
+const brushSlider = document.querySelector('#brushSize');
 const undoButton = document.querySelector('#undo');
 const redoButton = document.querySelector('#redo');
 const clearButton = document.querySelector('#clear');
-const mirrorButton = document.querySelector('#mirror');
-const colorBar = document.querySelector('#colors');
-const brushSlider = document.querySelector('#brushSize');
+const finishButton = document.querySelector('#finish');
+const restartButton = document.querySelector('#restart');
 const pngButton = document.querySelector('#exportPng');
 const svgButton = document.querySelector('#exportSvg');
 const hint = document.querySelector('#hint');
 const toast = document.querySelector('#toast');
 const installButton = document.querySelector('#install');
 
-const state = { folds: DEFAULT_FOLDS, color: DEFAULT_COLOR, mirror: true };
+const foldButtons = foldGroup ? Array.from(foldGroup.querySelectorAll('[data-fold]')) : [];
+const state = { folds: DEFAULT_FOLDS, mode: 'folded' };
 
 let board = null;
 let toastTimer = 0;
@@ -32,41 +32,6 @@ let installPrompt = null;
 function brushWidth(sliderValue) {
   const ratio = Math.min(Math.max(Number(sliderValue), 0), 100) / 100;
   return Math.round((MIN_WIDTH + ratio * (MAX_WIDTH - MIN_WIDTH)) * 1e4) / 1e4;
-}
-
-function syncHistory() {
-  // createBoard 可能在构造期间就回调一次状态变更，此时 board 还没赋值
-  if (!board) return;
-  undoButton.disabled = !board.canUndo();
-  redoButton.disabled = !board.canRedo();
-  clearButton.disabled = !board.canUndo();
-}
-
-function selectFold(folds) {
-  state.folds = folds;
-  for (const button of foldGroup.querySelectorAll('[data-fold]')) {
-    const active = Number(button.dataset.fold) === folds;
-    button.classList.toggle('is-active', active);
-    button.setAttribute('aria-pressed', String(active));
-  }
-  board.setFold(folds);
-}
-
-function selectColor(swatch) {
-  state.color = swatch.dataset.color;
-  for (const item of colorBar.querySelectorAll('.swatch')) {
-    const active = item === swatch;
-    item.classList.toggle('is-active', active);
-    item.setAttribute('aria-pressed', String(active));
-  }
-  board.setColor(state.color);
-}
-
-function toggleMirror() {
-  state.mirror = !state.mirror;
-  mirrorButton.setAttribute('aria-pressed', String(state.mirror));
-  board.setMirror(state.mirror);
-  syncHistory();
 }
 
 function showToast(message) {
@@ -81,19 +46,57 @@ function fadeHint() {
   hint.setAttribute('aria-hidden', 'true');
 }
 
-function collectStrokes() {
-  const strokes = board.getStrokes();
-  if (strokes.length > 0) return strokes;
-  showToast('先画几笔再导出');
-  return null;
+// 唯一的状态出口：mode 驱动两组控件的显隐，历史栈驱动按钮禁用。
+function syncUI() {
+  if (!board) return;
+  const mode = board.getMode();
+  const folded = mode === 'folded';
+  state.mode = mode;
+  document.body.dataset.mode = mode;
+  for (const button of foldButtons) {
+    const active = Number(button.dataset.fold) === state.folds;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+    button.disabled = !folded;
+  }
+  brushSlider.disabled = !folded;
+  undoButton.disabled = !board.canUndo();
+  redoButton.disabled = !board.canRedo();
+  clearButton.disabled = !board.canUndo();
+  finishButton.disabled = board.getStrokes().length === 0;
+}
+
+function selectFold(folds) {
+  if (!board || state.mode !== 'folded') return;
+  state.folds = folds;
+  board.setFold(folds);
+  syncUI();
+}
+
+function handleFinish() {
+  if (!board) return;
+  if (!board.finish()) {
+    showToast('先画几笔再完成');
+    return;
+  }
+  fadeHint();
+}
+
+function handleRestart() {
+  if (!board) return;
+  board.restart();
+  showToast('笔迹已保留，继续画');
 }
 
 async function handleExportPng() {
-  const strokes = collectStrokes();
-  if (!strokes) return;
+  const spec = board.exportSpec();
+  if (spec.strokes.length === 0) {
+    showToast('还没有笔迹可以保存');
+    return;
+  }
   pngButton.disabled = true;
   try {
-    await exportPNG({ strokes, folds: state.folds, mirror: state.mirror, size: PNG_SIZE });
+    await exportPNG({ strokes: spec.strokes, folds: spec.folds, size: PNG_SIZE });
     showToast('PNG 已保存');
   } catch {
     showToast('PNG 导出失败，请再试一次');
@@ -103,10 +106,13 @@ async function handleExportPng() {
 }
 
 function handleExportSvg() {
-  const strokes = collectStrokes();
-  if (!strokes) return;
+  const spec = board.exportSpec();
+  if (spec.strokes.length === 0) {
+    showToast('还没有笔迹可以保存');
+    return;
+  }
   try {
-    exportSVG({ strokes, folds: state.folds, mirror: state.mirror, size: SVG_SIZE });
+    exportSVG({ strokes: spec.strokes, folds: spec.folds, size: SVG_SIZE });
     showToast('SVG 已保存');
   } catch {
     showToast('SVG 导出失败，请再试一次');
@@ -115,16 +121,17 @@ function handleExportSvg() {
 
 function handleShortcut(event) {
   if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+  if (!board || state.mode !== 'folded') return;
   const key = event.key.toLowerCase();
   if (key === 'z') {
     event.preventDefault();
     if (event.shiftKey) board.redo();
     else board.undo();
-    syncHistory();
+    syncUI();
   } else if (key === 'y') {
     event.preventDefault();
     board.redo();
-    syncHistory();
+    syncUI();
   }
 }
 
@@ -140,24 +147,15 @@ function registerServiceWorker() {
 
 board = createBoard(canvas, {
   folds: state.folds,
-  color: state.color,
   width: brushWidth(brushSlider.value),
-  mirror: state.mirror,
-  onChange: syncHistory
+  onChange: syncUI
 });
-board.onStateChange = syncHistory;
+board.onStateChange = syncUI;
 
 foldGroup.addEventListener('click', (event) => {
   const button = event.target.closest('[data-fold]');
   if (button) selectFold(Number(button.dataset.fold));
 });
-
-colorBar.addEventListener('click', (event) => {
-  const swatch = event.target.closest('.swatch');
-  if (swatch) selectColor(swatch);
-});
-
-mirrorButton.addEventListener('click', toggleMirror);
 
 brushSlider.addEventListener('input', () => {
   board.setWidth(brushWidth(brushSlider.value));
@@ -165,19 +163,21 @@ brushSlider.addEventListener('input', () => {
 
 undoButton.addEventListener('click', () => {
   board.undo();
-  syncHistory();
+  syncUI();
 });
 
 redoButton.addEventListener('click', () => {
   board.redo();
-  syncHistory();
+  syncUI();
 });
 
 clearButton.addEventListener('click', () => {
   board.clear();
-  syncHistory();
+  syncUI();
 });
 
+finishButton.addEventListener('click', handleFinish);
+restartButton.addEventListener('click', handleRestart);
 pngButton.addEventListener('click', handleExportPng);
 svgButton.addEventListener('click', handleExportSvg);
 
@@ -205,6 +205,6 @@ window.addEventListener('appinstalled', () => {
   showToast('已添加到桌面');
 });
 
-syncHistory();
+syncUI();
 registerServiceWorker();
 window.__papercutBooted = true;

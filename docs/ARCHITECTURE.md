@@ -10,7 +10,8 @@
 | 红纸 | `#BE2428` | 折起来的纸 / 成品纸盘 |
 | 金笔（折叠态笔迹） | `#D98B3F` | 用户在红纸上画的线 |
 | 刻线（成品笔迹） | `#FFFFFF` | 展开后同一批笔迹变成「剪掉」的白线 |
-| 装饰纹 | `#FFFFFF` @ 0.5 alpha，线宽 0.0015 | 只画在折叠态红纸上（云纹 + 斜排线） |
+| 装饰纹 | `#FFFFFF` @ 0.5 alpha，线宽 0.0015 | 只画在折叠态红纸上（3 组云纹带：半径 0.14 / 0.24 / 0.34，云头数 3 / 4 / 5） |
+| 成品内缩 | `DISK_INSET = 0.94` | 成品红盘直径只占画布 94%，四周留 3% 白边，盘边不被画布圆角切平 |
 
 ## 1. 几何（沿用 v1）
 
@@ -72,7 +73,7 @@ board.undo(); board.redo(); board.clear(); board.canUndo(); board.canRedo();
 board.getStrokes(); board.loadStrokes(list);
 board.getMode()       // 'folded' | 'unfolding' | 'final'
 board.finish()        // folded → 播放 ~900ms 展开动画 → final；无笔迹时忽略并返回 false
-board.restart()       // 任意态 → 清空笔迹 + folded
+board.restart()       // 任意态 → 回到 folded，**保留笔迹**（让用户继续改）；清空请用 clear()
 board.exportSpec()    // → { strokes, folds }（供导出使用）
 board.render(); board.destroy(); board.onStateChange = fn;
 ```
@@ -92,7 +93,9 @@ export function exportSVG({ strokes, folds, size = 1024 });
 ```
 - 只导出**成品态**（不导出折叠态、不含装饰纹、不含引导）。
 - SVG 与 PNG 必须共用 `expandMatrices` + `toPathCommands`，逐点一致；文件名 `papercut-<folds>fold-<yyyymmdd-hhmm>.<ext>`。
-- 展开后的红盘 = 半径 0.5 的圆；超过圆外的笔迹不得出现在导出里（用 `<clipPath>` 或路径裁切）。
+- 展开后的红盘：设计半径 0.5，经成品相机 `DISK_INSET` 内缩后屏幕/导出半径 = `0.47 × size`，盘外留白 `0.03 × size`；
+  超过圆外的笔迹不得出现在导出里（用 `<clipPath>` 或路径裁切）。
+- 导出必须与 `renderFinal` 用**同一个相机**：坐标 `design × 0.94 × size + 0.03 × size`，线宽同样乘 0.94。
 
 ## 6. DOM 契约（id 不可改）
 
@@ -104,7 +107,7 @@ export function exportSVG({ strokes, folds, size = 1024 });
 | `#undo` `#redo` `#clear` | button | 折叠态可用 |
 | `#brushSize` | input[type=range] | 笔宽 |
 | `#finish` | button | 完成 → 播放展开 |
-| `#restart` | button | 重画（final 态显示） |
+| `#restart` | button | 文案「继续画」，final 态显示 → 回到 folded 且保留笔迹 |
 | `#exportPng` `#exportSvg` | button | 保存（final 态显示） |
 | `#hint` | div | 首次落笔淡出 |
 | `#toast` | div[aria-live=polite] | 轻提示 |

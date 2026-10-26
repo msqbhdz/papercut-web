@@ -1,16 +1,44 @@
+// v2 折叠-展开模型：纯几何 + 三态渲染。顶层零 DOM 依赖，只用 Math 与标准 Canvas 2D。
+
 const TAU = Math.PI * 2;
 const CENTER = { x: 0.5, y: 0.5 };
 const MAX_RADIUS = 0.5;
+// 成品态内缩：红盘直径只占画布 94%，四周各留 3% 白边，盘边才不会被画布圆角/边缘切平。
+export const DISK_INSET = 0.94;
 // canvas 的 y 轴向下，正上方因此是 -π/2。
 const AXIS = -Math.PI / 2;
 const EPS = 1e-9;
 
-const GUIDE_DASH = [0.02, 0.014];
-const GUIDE_WIDTH = 0.004;
-const GUIDE_DOT_RADIUS = 0.008;
-const GUIDE_COLOR = 'rgba(0, 0, 0, 0.28)';
+// 折叠态相机：顶点落在画布 88% 高处，外弧距顶点 0.86 倍画布高，最宽处不超过画布 92% 宽。
+const FOLD_VERTEX_Y = 0.88;
+const FOLD_REACH = 0.86;
+const FOLD_WIDTH_FILL = 0.92;
 
-export const FOLD_OPTIONS = [2, 4, 8, 12];
+// 装饰纹：白色 @ 0.5 alpha，线宽 0.0015（归一化单位）。
+const DECO_WIDTH = 0.0015;
+const DECO_ALPHA = 0.5;
+const DECO_MIN_ALPHA = 0.01;
+
+// 镜像片是压在下面的那几层：折着时完全被盖住，展开到 0.25 才全部露出。
+const UNDER_REVEAL = 0.25;
+
+// 拖影层：先画刻得最深的那一层。
+const TRAIL_LAGS = [0.12, 0.06];
+const TRAIL_ALPHAS = [0.1, 0.22];
+
+const IDENTITY = [1, 0, 0, 1, 0, 0];
+// 竖直镜像：折叠态装饰纹也按 D_n 画一份镜像，展开首帧才不会与折叠态不同。
+const MIRROR = [-1, 0, 0, 1, 1, 0];
+const FALLBACK_FOLDS = 6;
+
+export const FOLD_OPTIONS = [4, 6, 8];
+export const FOLD_LABELS = { 4: '四角', 6: '六角', 8: '八角' };
+export const PALETTE = {
+  paperBg: '#E9EBE8',
+  paper: '#BE2428',
+  inkFolded: '#D98B3F',
+  inkCut: '#FFFFFF',
+};
 
 export function sectorAngle(folds) {
   return TAU / folds;
@@ -112,12 +140,110 @@ export function toSvgPathD(commands) {
   const parts = [];
   for (const command of commands) {
     if (command.op === 'Q') {
-      parts.push(`Q ${fixed(command.cx)} ${fixed(command.cy)} ${fixed(command.x)} ${fixed(command.y)}`);
+      parts.push('Q ' + fixed(command.cx) + ' ' + fixed(command.cy) + ' ' + fixed(command.x) + ' ' + fixed(command.y));
     } else {
-      parts.push(`${command.op} ${fixed(command.x)} ${fixed(command.y)}`);
+      parts.push(command.op + ' ' + fixed(command.x) + ' ' + fixed(command.y));
     }
   }
   return parts.join(' ');
+}
+
+// screen = design * scale + t：顶点居中于画布宽、落在 88% 高处，scale 取竖直/水平两个约束的较小值。
+export function foldedCamera(folds, size) {
+  const extent = Number(size) || 0;
+  const half = sectorAngle(folds) / 2;
+  const vertical = 2 * FOLD_REACH * extent;
+  const horizontal = half > 0 && half < Math.PI / 2
+    ? (FOLD_WIDTH_FILL * extent) / Math.sin(half)
+    : vertical;
+  const scale = Math.min(vertical, horizontal);
+  return {
+    scale,
+    tx: extent / 2 - CENTER.x * scale,
+    ty: FOLD_VERTEX_Y * extent - CENTER.y * scale,
+  };
+}
+
+// 成品态相机：screen = design * size * DISK_INSET + size * (1 - DISK_INSET) / 2，即居中内缩。
+// renderUnfold 的收尾相机与 renderFinal 必须共用它，否则动画最后一帧会跳一下再落到成品位置。
+function finalCamera(size) {
+  const scale = size * DISK_INSET;
+  const offset = (size * (1 - DISK_INSET)) / 2;
+  return { scale, tx: offset, ty: offset };
+}
+
+function clamp01(value) {
+  const t = Number(value);
+  if (!Number.isFinite(t)) return 0;
+  return t < 0 ? 0 : t > 1 ? 1 : t;
+}
+
+function easeOutCubic(t) {
+  const rest = 1 - t;
+  return 1 - rest * rest * rest;
+}
+
+function lerpCamera(from, to, t) {
+  return {
+    scale: from.scale + (to.scale - from.scale) * t,
+    tx: from.tx + (to.tx - from.tx) * t,
+    ty: from.ty + (to.ty - from.ty) * t,
+  };
+}
+
+function hexToRgb(hex) {
+  const text = String(hex).replace('#', '');
+  const full = text.length === 3 ? text.split('').map((c) => c + c).join('') : text;
+  const value = parseInt(full, 16);
+  return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
+}
+
+// 颜色插值：t=0 两端分别取 from / to。
+function mixHex(from, to, t) {
+  const k = clamp01(t);
+  const a = hexToRgb(from);
+  const b = hexToRgb(to);
+  const r = Math.round(a.r + (b.r - a.r) * k);
+  const g = Math.round(a.g + (b.g - a.g) * k);
+  const bl = Math.round(a.b + (b.b - a.b) * k);
+  return 'rgb(' + r + ', ' + g + ', ' + bl + ')';
+}
+
+// 笔迹金色→白色的分界：p < 0.65 一直是金色，最后 35% 才过渡到白色，动画前半段笔迹不发灰。
+const INK_WHITE_START = 0.65;
+
+function inkColor(progress) {
+  return mixHex(PALETTE.inkFolded, PALETTE.inkCut, clamp01((progress - INK_WHITE_START) / (1 - INK_WHITE_START)));
+}
+
+// 每片纸的变换：Rot(k·Δ·progress)，镜像片再右乘 Reflect(θ0)；progress=0 时镜像片与原片重合。
+function sectorMatrixArgs(k, m, delta, progress) {
+  const angle = k * delta * progress;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const a = m === 1 ? cos : -cos;
+  const b = m === 1 ? sin : -sin;
+  const c = -sin;
+  const d = cos;
+  return [a, b, c, d, CENTER.x - (a * CENTER.x + c * CENTER.y), CENTER.y - (b * CENTER.x + d * CENTER.y)];
+}
+
+function fanSectors(folds, progress) {
+  const delta = sectorAngle(folds);
+  const sectors = [];
+  for (let k = 0; k < folds; k += 1) {
+    sectors.push({ m: 1, args: sectorMatrixArgs(k, 1, delta, progress) });
+    sectors.push({ m: -1, args: sectorMatrixArgs(k, -1, delta, progress) });
+  }
+  return sectors;
+}
+
+// 只追加子路径，不 beginPath：装饰纹要攒成一条路径一次 stroke，重叠处才不会叠加 alpha。
+function addWedgePath(ctx, folds) {
+  const half = sectorAngle(folds) / 2;
+  ctx.moveTo(CENTER.x, CENTER.y);
+  ctx.arc(CENTER.x, CENTER.y, MAX_RADIUS, AXIS - half, AXIS + half);
+  ctx.closePath();
 }
 
 function tracePath(ctx, commands) {
@@ -128,59 +254,206 @@ function tracePath(ctx, commands) {
   }
 }
 
-function drawSectorGuides(ctx, folds) {
+function paintStroke(ctx, commands, width, color) {
+  if (commands.length === 1) {
+    ctx.beginPath();
+    ctx.arc(commands[0].x, commands[0].y, width / 2, 0, TAU);
+    ctx.fillStyle = color;
+    ctx.fill();
+    return;
+  }
+  ctx.beginPath();
+  tracePath(ctx, commands);
+  ctx.lineWidth = width;
+  ctx.strokeStyle = color;
+  ctx.stroke();
+}
+
+function paintBackground(ctx, size) {
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = PALETTE.paperBg;
+  ctx.fillRect(0, 0, size, size);
+}
+
+function resolveSize(ctx, opts) {
+  if (Number.isFinite(opts.size) && opts.size > 0) return opts.size;
+  const canvas = ctx.canvas;
+  if (canvas && Number.isFinite(canvas.width) && canvas.width > 0) return canvas.width;
+  return 0;
+}
+
+function resolveFolds(opts) {
+  const folds = Number(opts.folds);
+  return Number.isFinite(folds) && folds > 1 ? folds : FALLBACK_FOLDS;
+}
+
+function polarPoint(radius, offset) {
+  const angle = AXIS + offset;
+  return { x: CENTER.x + radius * Math.cos(angle), y: CENTER.y + radius * Math.sin(angle) };
+}
+
+// 三条云纹带沿轴等距排开：半径 0.14 / 0.24 / 0.34，各带的张角逐步放宽，
+// 云头数同步增加（3 / 4 / 5），于是每条带里的云头在画面上一样大，三条带形成同一节奏。
+const CLOUD_BANDS = [
+  { radius: 0.14, span: 0.5, lobes: 3 },
+  { radius: 0.24, span: 0.58, lobes: 4 },
+  { radius: 0.34, span: 0.66, lobes: 5 },
+];
+
+// 一组云头：沿轴一列等宽的向外凸弧瓣，鼓高恒等于弧瓣宽的一半；
+// 两端各收一条向内卷的云尾，让这条带子有明确的起止，不再像横贯的一条长线。
+function addCloudBand(ctx, radius, halfSpan, lobes) {
+  const step = (2 * halfSpan) / lobes;
+  const amplitude = radius * step * 0.5;
+  const first = polarPoint(radius, -halfSpan);
+  ctx.moveTo(first.x, first.y);
+  for (let i = 0; i < lobes; i += 1) {
+    const from = -halfSpan + i * step;
+    const control = polarPoint(radius + amplitude, from + step / 2);
+    const end = polarPoint(radius, from + step);
+    ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
+  }
+  for (const side of [-1, 1]) {
+    const anchor = polarPoint(radius, side * halfSpan);
+    const control = polarPoint(radius - amplitude * 0.6, side * (halfSpan + step * 0.5));
+    const tail = polarPoint(radius - amplitude * 1.7, side * (halfSpan + step * 0.25));
+    ctx.moveTo(anchor.x, anchor.y);
+    ctx.quadraticCurveTo(control.x, control.y, tail.x, tail.y);
+  }
+}
+
+// 3 组云头：最外一组最高到 0.357，整组都在半径 0.5 的楔形内，也不越过楔形的两条径向边。
+function buildDecorations(ctx, folds) {
   const half = sectorAngle(folds) / 2;
-  const from = AXIS - half;
-  const to = AXIS + half;
+  for (const band of CLOUD_BANDS) addCloudBand(ctx, band.radius, half * band.span, band.lobes);
+}
+
+function paintDecorations(ctx, folds, sectors, alpha) {
+  if (alpha <= DECO_MIN_ALPHA) return;
   ctx.save();
-  ctx.strokeStyle = GUIDE_COLOR;
-  ctx.fillStyle = GUIDE_COLOR;
-  ctx.lineWidth = GUIDE_WIDTH;
-  ctx.setLineDash(GUIDE_DASH);
   ctx.beginPath();
-  ctx.moveTo(CENTER.x, CENTER.y);
-  ctx.lineTo(CENTER.x + MAX_RADIUS * Math.cos(from), CENTER.y + MAX_RADIUS * Math.sin(from));
-  ctx.moveTo(CENTER.x, CENTER.y);
-  ctx.lineTo(CENTER.x + MAX_RADIUS * Math.cos(to), CENTER.y + MAX_RADIUS * Math.sin(to));
+  for (const sector of sectors) {
+    const args = sector.args;
+    ctx.save();
+    ctx.transform(args[0], args[1], args[2], args[3], args[4], args[5]);
+    buildDecorations(ctx, folds);
+    ctx.restore();
+  }
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = PALETTE.inkCut;
+  ctx.lineWidth = DECO_WIDTH;
   ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.beginPath();
-  ctx.arc(CENTER.x, CENTER.y, MAX_RADIUS, from, to);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(CENTER.x, CENTER.y, GUIDE_DOT_RADIUS, 0, TAU);
-  ctx.fill();
   ctx.restore();
 }
 
-export function renderDesign(ctx, strokes, opts = {}) {
-  const { folds, size, mirror = true, drawGuides = false } = opts;
-  const matrices = expandMatrices(folds, mirror);
-  ctx.save();
-  ctx.setTransform(size, 0, 0, size, 0, 0);
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  for (const stroke of strokes || []) {
+function paintStrokes(ctx, strokes, color) {
+  for (const stroke of strokes) {
     const commands = toPathCommands(stroke.points);
     if (commands.length === 0) continue;
-    for (const matrix of matrices) {
-      ctx.save();
-      ctx.transform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f);
-      ctx.strokeStyle = stroke.color;
-      ctx.fillStyle = stroke.color;
-      if (commands.length === 1) {
-        ctx.beginPath();
-        ctx.arc(commands[0].x, commands[0].y, stroke.width / 2, 0, TAU);
-        ctx.fill();
-      } else {
-        ctx.lineWidth = stroke.width;
-        ctx.beginPath();
-        tracePath(ctx, commands);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
+    paintStroke(ctx, commands, stroke.width, color);
   }
-  if (drawGuides) drawSectorGuides(ctx, folds);
+}
+
+// 展开中的一帧：纸只用 m=1 的 n 片楔形旋转 k·Δ·progress 拼成整圆，一次 fill 一次 clip。
+// 镜像片（det=-1）作用在楔形这个形状上与 m=1 的那片逐点重合、绕向相反，
+// 若一起进同一条路径，nonzero 规则下两块互相抵消成空，纸与裁切区都会是空的。
+function paintFan(ctx, strokes, folds, progress, cam, options) {
+  const sectors = fanSectors(folds, progress);
+  const paper = sectors.filter((sector) => sector.m === 1);
+  ctx.save();
+  ctx.transform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
+  ctx.globalAlpha = options.alpha;
+  ctx.beginPath();
+  for (const sector of paper) {
+    ctx.save();
+    ctx.transform(sector.args[0], sector.args[1], sector.args[2], sector.args[3], sector.args[4], sector.args[5]);
+    addWedgePath(ctx, folds);
+    ctx.restore();
+  }
+  ctx.fillStyle = PALETTE.paper;
+  ctx.fill();
+  ctx.clip();
+  paintDecorations(ctx, folds, sectors, options.alpha * options.decoAlpha);
+  const under = Math.min(1, progress / UNDER_REVEAL);
+  for (const sector of sectors) {
+    const alpha = sector.m === 1 ? 1 : under;
+    if (alpha < DECO_MIN_ALPHA) continue;
+    ctx.save();
+    ctx.globalAlpha = options.alpha * alpha;
+    ctx.transform(sector.args[0], sector.args[1], sector.args[2], sector.args[3], sector.args[4], sector.args[5]);
+    paintStrokes(ctx, strokes, options.ink);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+export function renderFolded(ctx, strokes, opts = {}) {
+  const folds = resolveFolds(opts);
+  const size = resolveSize(ctx, opts);
+  const cam = opts.camera || foldedCamera(folds, size);
+  ctx.save();
+  paintBackground(ctx, size);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.transform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
+  ctx.beginPath();
+  addWedgePath(ctx, folds);
+  ctx.fillStyle = PALETTE.paper;
+  ctx.fill();
+  ctx.clip();
+  paintDecorations(ctx, folds, [{ args: IDENTITY }, { args: MIRROR }], DECO_ALPHA);
+  paintStrokes(ctx, strokes || [], PALETTE.inkFolded);
+  ctx.restore();
+}
+
+export function renderUnfold(ctx, strokes, opts = {}, progress = 0) {
+  const folds = resolveFolds(opts);
+  const size = resolveSize(ctx, opts);
+  const p = clamp01(progress);
+  const from = opts.camera || foldedCamera(folds, size);
+  const to = finalCamera(size);
+  ctx.save();
+  paintBackground(ctx, size);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (let i = 0; i < TRAIL_LAGS.length; i += 1) {
+    const lag = p - TRAIL_LAGS[i];
+    const alpha = TRAIL_ALPHAS[i] * (1 - p);
+    if (lag < 0 || alpha <= DECO_MIN_ALPHA) continue;
+    paintFan(ctx, strokes || [], folds, lag, lerpCamera(from, to, easeOutCubic(lag)), {
+      alpha,
+      decoAlpha: DECO_ALPHA * (1 - lag),
+      ink: inkColor(lag),
+    });
+  }
+  paintFan(ctx, strokes || [], folds, p, lerpCamera(from, to, easeOutCubic(p)), {
+    alpha: 1,
+    decoAlpha: DECO_ALPHA * (1 - p),
+    ink: inkColor(p),
+  });
+  ctx.restore();
+}
+
+export function renderFinal(ctx, strokes, opts = {}) {
+  const folds = resolveFolds(opts);
+  const size = resolveSize(ctx, opts);
+  const cam = finalCamera(size);
+  const matrices = expandMatrices(folds, true);
+  ctx.save();
+  paintBackground(ctx, size);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.transform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
+  ctx.beginPath();
+  ctx.arc(CENTER.x, CENTER.y, MAX_RADIUS, 0, TAU);
+  ctx.fillStyle = PALETTE.paper;
+  ctx.fill();
+  ctx.clip();
+  for (const matrix of matrices) {
+    ctx.save();
+    ctx.transform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f);
+    paintStrokes(ctx, strokes || [], PALETTE.inkCut);
+    ctx.restore();
+  }
   ctx.restore();
 }

@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#c8102e">
-  <meta name="description" content="在朝上的扇形里画一笔，展开成对称的剪纸窗花。纯前端、可离线使用。">
+  <meta name="theme-color" content="#BE2428">
+  <meta name="description" content="在红纸上用金笔画一笔，点完成让它扇形甩开，变成红盘白刻线的剪纸窗花。纯前端、可离线使用。">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="剪纸">
@@ -16,43 +16,27 @@
   <link rel="apple-touch-icon" href="./icons/icon-180.png">
   <link rel="stylesheet" href="./style.css">
 </head>
-<body>
+<body data-mode="folded">
   <header class="topbar">
     <h1 class="brand"><span class="brand-mark" aria-hidden="true"></span>剪纸窗花</h1>
-    <button id="install" class="btn btn-chip" type="button" hidden>安装到桌面</button>
+    <div id="foldGroup" class="segmented" role="group" aria-label="折叠份数">
+      <button type="button" data-fold="4" aria-pressed="false">四角</button>
+      <button type="button" data-fold="6" class="is-active" aria-pressed="true">六角</button>
+      <button type="button" data-fold="8" aria-pressed="false">八角</button>
+    </div>
+    <button id="install" class="btn btn-chip" type="button" hidden><span class="chip-ico" aria-hidden="true"></span><span class="install-label">安装到桌面</span></button>
   </header>
 
   <main class="stage-wrap">
     <div id="stage">
-      <canvas id="board" aria-label="剪纸画板，请在朝上的扇形里落笔">你的浏览器不支持 canvas。</canvas>
+      <canvas id="board" aria-label="剪纸画板，请在红纸上落笔">你的浏览器不支持 canvas。</canvas>
     </div>
-    <div id="hint" class="hint">在朝上的扇形里画一笔<br>窗花会自动展开成对称图案</div>
+    <div id="hint" class="hint">在红纸上落笔<br>点「完成」让窗花甩开</div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </main>
 
   <footer class="toolbar">
-    <div class="row">
-      <div id="foldGroup" class="segmented" role="group" aria-label="折叠份数">
-        <button type="button" data-fold="2" aria-pressed="false">2</button>
-        <button type="button" data-fold="4" aria-pressed="false">4</button>
-        <button type="button" data-fold="8" class="is-active" aria-pressed="true">8</button>
-        <button type="button" data-fold="12" aria-pressed="false">12</button>
-      </div>
-      <button id="mirror" class="btn btn-toggle" type="button" aria-pressed="true">镜像</button>
-    </div>
-
-    <div class="row">
-      <div id="colors" class="palette" role="group" aria-label="颜色">
-        <button class="swatch is-active" type="button" data-color="#c8102e" style="--swatch: #c8102e" aria-label="中国红" aria-pressed="true"></button>
-        <button class="swatch" type="button" data-color="#d8a63a" style="--swatch: #d8a63a" aria-label="金" aria-pressed="false"></button>
-        <button class="swatch" type="button" data-color="#1a1a1a" style="--swatch: #1a1a1a" aria-label="墨黑" aria-pressed="false"></button>
-        <button class="swatch" type="button" data-color="#0f766e" style="--swatch: #0f766e" aria-label="松绿" aria-pressed="false"></button>
-        <button class="swatch" type="button" data-color="#2f5fa8" style="--swatch: #2f5fa8" aria-label="靛蓝" aria-pressed="false"></button>
-        <button class="swatch" type="button" data-color="#7a3fa0" style="--swatch: #7a3fa0" aria-label="紫" aria-pressed="false"></button>
-      </div>
-    </div>
-
-    <div class="row">
+    <div class="controls controls-fold">
       <label class="brush">
         <span class="brush-label">笔宽</span>
         <input id="brushSize" type="range" min="0" max="100" step="1" value="25" aria-label="笔画粗细">
@@ -60,9 +44,11 @@
       <button id="undo" class="btn" type="button" disabled>撤销</button>
       <button id="redo" class="btn" type="button" disabled>重做</button>
       <button id="clear" class="btn" type="button" disabled>清空</button>
+      <button id="finish" class="btn btn-primary" type="button" disabled>完成</button>
     </div>
 
-    <div class="row">
+    <div class="controls controls-final">
+      <button id="restart" class="btn" type="button">继续画</button>
       <button id="exportPng" class="btn btn-primary" type="button">保存 PNG</button>
       <button id="exportSvg" class="btn btn-outline" type="button">保存 SVG</button>
     </div>

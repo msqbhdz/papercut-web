@@ -1,7 +1,19 @@
-import { clampToSector, renderDesign, sectorAngle } from './symmetry.js';
+import {
+  clampToSector,
+  foldedCamera,
+  renderFinal,
+  renderFolded,
+  renderUnfold,
+  sectorAngle,
+} from './symmetry.js';
 
 const MIN_POINT_DISTANCE = 0.0015;
 const MAX_UNDO_DEPTH = 100;
+const UNFOLD_MS = 900;
+const MIN_WIDTH = 0.004;
+const MAX_WIDTH = 0.02;
+const DEFAULT_FOLDS = 6;
+const DEFAULT_WIDTH = 0.008;
 const TAU = Math.PI * 2;
 // 归一化圆心与「正上方」径向：canvas 的 y 轴向下，所以正上方是 -π/2。
 const CENTER = { x: 0.5, y: 0.5 };
@@ -44,13 +56,26 @@ function remapStrokes(list, oldFolds, newFolds) {
 // 仅为临时测试脚本暴露纯数学入口，不属于 Board 对外 API。
 export const __remapPointsForTest = remapPoints;
 
+function easeOutCubic(t) {
+  const rest = 1 - t;
+  return 1 - rest * rest * rest;
+}
+
+function normalizeFolds(value) {
+  const folds = Math.round(Number(value));
+  return Number.isFinite(folds) && folds > 1 ? folds : DEFAULT_FOLDS;
+}
+
+function clampWidth(value) {
+  const width = Number(value);
+  if (!Number.isFinite(width)) return DEFAULT_WIDTH;
+  return Math.min(Math.max(width, MIN_WIDTH), MAX_WIDTH);
+}
+
 export function createBoard(canvas, opts = {}) {
   const {
-    folds: initialFolds = 8,
-    color: initialColor = '#c8102e',
-    width: initialWidth = 0.008,
-    mirror: initialMirror = true,
-    paperColor = '#ffffff',
+    folds: initialFolds = DEFAULT_FOLDS,
+    width: initialWidth = DEFAULT_WIDTH,
     onChange = null,
   } = opts;
 
@@ -62,11 +87,14 @@ export function createBoard(canvas, opts = {}) {
   const cancelFrame = hasRaf
     ? (id) => globalThis.cancelAnimationFrame(id)
     : (id) => clearTimeout(id);
+  const clock = typeof globalThis.performance?.now === 'function'
+    ? () => globalThis.performance.now()
+    : () => Date.now();
 
-  let folds = initialFolds;
-  let strokeColor = initialColor;
-  let strokeWidth = initialWidth;
-  let mirror = initialMirror;
+  let folds = normalizeFolds(initialFolds);
+  let strokeWidth = clampWidth(initialWidth);
+  let mode = 'folded';
+  let progress = 0;
 
   // 快照式历史：每次提交产生一个不可变笔迹数组，undo/redo 两栈互相搬运快照本身。
   let strokes = [];
@@ -81,6 +109,8 @@ export function createBoard(canvas, opts = {}) {
   let dirty = false;
   let framePending = false;
   let frameId = 0;
+  let animId = 0;
+  let animStart = 0;
   let destroyed = false;
 
   function emit() {
@@ -96,19 +126,28 @@ export function createBoard(canvas, opts = {}) {
     }));
   }
 
+  // 画布按 CSS 像素正方向布局；渲染器自己 save/restore 并叠加相机，所以这里只负责把基准变换设成 DPR。
+  function cssSide() {
+    if (typeof canvas.getBoundingClientRect !== 'function') return 0;
+    const rect = canvas.getBoundingClientRect();
+    return Math.min(rect.width, rect.height);
+  }
+
   function paint() {
     if (!ctx) return;
-    const w = canvas.width;
-    const h = canvas.height;
-    if (!w || !h) return;
-    ctx.fillStyle = paperColor;
-    ctx.fillRect(0, 0, w, h);
-    renderDesign(ctx, liveStroke ? [...strokes, liveStroke] : strokes, {
-      folds,
-      size: Math.min(w, h),
-      mirror,
-      drawGuides: true,
-    });
+    const dpr = globalThis.devicePixelRatio || 1;
+    let size = cssSide();
+    if (!(size > 0)) size = canvas.width / dpr;
+    if (!(size > 0)) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const list = liveStroke ? [...strokes, liveStroke] : strokes;
+    if (mode === 'final') {
+      renderFinal(ctx, list, { folds, size });
+      return;
+    }
+    const camera = foldedCamera(folds, size);
+    if (mode === 'unfolding') renderUnfold(ctx, list, { folds, size, camera }, progress);
+    else renderFolded(ctx, list, { folds, size, camera });
   }
 
   function markDirty() {
@@ -126,35 +165,39 @@ export function createBoard(canvas, opts = {}) {
     paint();
   }
 
+  function dropFrame() {
+    if (!framePending) return;
+    cancelFrame(frameId);
+    framePending = false;
+    frameId = 0;
+  }
+
+  function cancelAnim() {
+    if (!animId) return;
+    cancelFrame(animId);
+    animId = 0;
+  }
+
   function render() {
     if (destroyed) return;
-    if (framePending) {
-      cancelFrame(frameId);
-      framePending = false;
-      frameId = 0;
-    }
+    dropFrame();
     dirty = false;
     paint();
   }
 
   function resize() {
     if (destroyed) return false;
+    if (typeof canvas.getBoundingClientRect !== 'function') return false;
     const rect = canvas.getBoundingClientRect();
-    const cssWidth = Math.round(rect.width);
-    const cssHeight = Math.round(rect.height);
-    if (cssWidth < 1 || cssHeight < 1) return false;
+    const size = Math.min(rect.width, rect.height);
+    if (!(size >= 1)) return false;
     const dpr = globalThis.devicePixelRatio || 1;
-    const width = Math.max(1, Math.round(cssWidth * dpr));
-    const height = Math.max(1, Math.round(cssHeight * dpr));
-    if (canvas.width === width && canvas.height === height) return false;
+    const side = Math.max(1, Math.round(size * dpr));
+    if (canvas.width === side && canvas.height === side) return false;
     // 改写 backing store 会清空画布，因此立刻补一帧，避免出现空白闪烁。
-    canvas.width = width;
-    canvas.height = height;
-    if (framePending) {
-      cancelFrame(frameId);
-      framePending = false;
-      frameId = 0;
-    }
+    canvas.width = side;
+    canvas.height = side;
+    dropFrame();
     dirty = false;
     paint();
     return true;
@@ -195,25 +238,25 @@ export function createBoard(canvas, opts = {}) {
     commit([...strokes, stroke]);
   }
 
-  function pointFrom(event) {
+  // 屏幕坐标 → 折叠态相机逆变换 → 归一化设计坐标 → 夹进扇区。
+  function designFrom(event) {
+    if (typeof canvas.getBoundingClientRect !== 'function') return null;
     const rect = canvas.getBoundingClientRect();
-    if (rect.width < 1 || rect.height < 1) return null;
-    return {
-      x: (event.clientX - rect.left) / rect.width,
-      y: (event.clientY - rect.top) / rect.height,
-    };
+    const size = Math.min(rect.width, rect.height);
+    if (!(size > 0)) return null;
+    const camera = foldedCamera(folds, size);
+    if (!(camera.scale > 0)) return null;
+    const x = (event.clientX - rect.left - camera.tx) / camera.scale;
+    const y = (event.clientY - rect.top - camera.ty) / camera.scale;
+    return clampToSector({ x, y }, folds);
   }
 
   function handlePointerDown(event) {
-    if (destroyed || activePointer !== null) return;
-    const raw = pointFrom(event);
-    if (!raw) return;
+    if (destroyed || mode !== 'folded' || activePointer !== null) return;
+    const point = designFrom(event);
+    if (!point) return;
     activePointer = event.pointerId;
-    liveStroke = {
-      color: strokeColor,
-      width: strokeWidth,
-      points: [clampToSector(raw, folds)],
-    };
+    liveStroke = { width: strokeWidth, points: [point] };
     try {
       canvas.setPointerCapture(event.pointerId);
     } catch {
@@ -223,10 +266,9 @@ export function createBoard(canvas, opts = {}) {
   }
 
   function handlePointerMove(event) {
-    if (event.pointerId !== activePointer || !liveStroke) return;
-    const raw = pointFrom(event);
-    if (!raw) return;
-    const point = clampToSector(raw, folds);
+    if (mode !== 'folded' || event.pointerId !== activePointer || !liveStroke) return;
+    const point = designFrom(event);
+    if (!point) return;
     const last = liveStroke.points[liveStroke.points.length - 1];
     if (Math.hypot(point.x - last.x, point.y - last.y) < MIN_POINT_DISTANCE) return;
     liveStroke.points.push(point);
@@ -246,34 +288,23 @@ export function createBoard(canvas, opts = {}) {
   }
 
   function setFold(next) {
-    if (next === folds) return;
+    if (destroyed || mode !== 'folded') return;
+    const target = normalizeFolds(next);
+    if (target === folds) return;
     // 正在画的一笔按旧扇区采点，不能参与重映射，直接丢弃。
     abortActive();
-    strokes = remapStrokes(strokes, folds, next);
-    remapStack(undoStack, folds, next);
-    remapStack(redoStack, folds, next);
-    folds = next;
+    strokes = remapStrokes(strokes, folds, target);
+    remapStack(undoStack, folds, target);
+    remapStack(redoStack, folds, target);
+    folds = target;
     markDirty();
-    emit();
-  }
-
-  function setColor(next) {
-    if (next === strokeColor) return;
-    strokeColor = next;
     emit();
   }
 
   function setWidth(next) {
-    if (next === strokeWidth) return;
-    strokeWidth = next;
-    emit();
-  }
-
-  function setMirror(next) {
-    const value = Boolean(next);
-    if (value === mirror) return;
-    mirror = value;
-    markDirty();
+    const value = clampWidth(next);
+    if (value === strokeWidth) return;
+    strokeWidth = value;
     emit();
   }
 
@@ -319,14 +350,65 @@ export function createBoard(canvas, opts = {}) {
     return redoStack.length > 0;
   }
 
+  function getMode() {
+    return mode;
+  }
+
+  function exportSpec() {
+    return { strokes: getStrokes(), folds };
+  }
+
+  // 展开动画：progress 用 easeOutCubic 从 0 推到 1，收尾切 final 并只 emit 一次。
+  function stepUnfold() {
+    animId = 0;
+    if (destroyed || mode !== 'unfolding') return;
+    const elapsed = clock() - animStart;
+    const t = elapsed / UNFOLD_MS;
+    if (t >= 1) {
+      progress = 1;
+      mode = 'final';
+      dirty = false;
+      paint();
+      emit();
+      return;
+    }
+    progress = easeOutCubic(t > 0 ? t : 0);
+    dirty = false;
+    paint();
+    animId = requestFrame(stepUnfold);
+  }
+
+  function finish() {
+    if (destroyed || mode !== 'folded') return false;
+    abortActive();
+    if (strokes.length === 0) return false;
+    dropFrame();
+    mode = 'unfolding';
+    progress = 0;
+    dirty = false;
+    emit();
+    paint();
+    animStart = clock();
+    cancelAnim();
+    animId = requestFrame(stepUnfold);
+    return true;
+  }
+
+  function restart() {
+    if (destroyed) return;
+    cancelAnim();
+    abortActive();
+    mode = 'folded';
+    progress = 0;
+    markDirty();
+    emit();
+  }
+
   function destroy() {
     if (destroyed) return;
     destroyed = true;
-    if (framePending) {
-      cancelFrame(frameId);
-      framePending = false;
-      frameId = 0;
-    }
+    dropFrame();
+    cancelAnim();
     dirty = false;
     abortActive();
     if (observer) observer.disconnect();
@@ -344,16 +426,18 @@ export function createBoard(canvas, opts = {}) {
   const board = {
     onStateChange: typeof onChange === 'function' ? onChange : null,
     setFold,
-    setColor,
     setWidth,
-    setMirror,
     undo,
     redo,
     clear,
-    getStrokes,
-    loadStrokes,
     canUndo,
     canRedo,
+    getStrokes,
+    loadStrokes,
+    getMode,
+    finish,
+    restart,
+    exportSpec,
     render,
     destroy,
   };
