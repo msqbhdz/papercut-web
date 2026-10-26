@@ -92,6 +92,20 @@ papercut-web/
 
 > 项目站点在子路径下运行，因此**所有资源引用都是相对路径**（`./js/main.js`）。若要部署到根域名，无需任何改动。
 
+## 发版注意（GitHub Pages 边缘缓存）
+
+GitHub Pages 的 Fastly 边缘会把**静态资源按 URL 钉住**，实测出现过大改版后 `js/*.js` 仍返回旧对象（`Last-Modified` 停在上一版、加任意 query 也不绕过）的情况。
+因此本项目把资源文件名带上**发布标记**：
+
+```
+js/symmetry.v2.js  js/draw.v2.js  js/export.v2.js  js/main.v2.js  style.v2.css  sw.v2.js
+```
+
+**每次改动 js/ 或 style 后，把文件名里的 `v2` 递增（并同步改 `index.html`、各模块的 import、`sw.v2.js` 的 PRECACHE 与 CACHE 名）。
+只改内容不改文件名，边缘节点可能继续发旧代码**，这在真机上是「改了没生效」的经典错觉。
+
+另外加了 `.nojekyll`：GitHub Pages 默认跑 Jekyll，会忽略以下划线开头的文件/目录，静态站建议显式关掉。
+
 ## 兼容性
 
 iOS Safari 16+、Android Chrome 110+、桌面版现代浏览器。无需任何 polyfill。
