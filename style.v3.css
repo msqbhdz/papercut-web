@@ -571,14 +571,10 @@ body[data-mode='unfolding'] .controls {
   }
 }
 
-/* 宽屏才把安装文案放出来，手机始终只留图标。 */
+/* 安装入口只在手机出现：电脑端把整个按钮藏掉，避免被当成来路不明的弹窗。 */
 @media (min-width: 481px) {
-  .install-label {
-    position: static;
-    width: auto;
-    height: auto;
-    overflow: visible;
-    clip-path: none;
+  #install {
+    display: none;
   }
 }
 
