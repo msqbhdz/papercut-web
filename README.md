@@ -101,8 +101,18 @@ GitHub Pages 的 Fastly 边缘会把**静态资源按 URL 钉住**，实测出�
 js/symmetry.v2.js  js/draw.v2.js  js/export.v2.js  js/main.v2.js  style.v2.css  sw.v2.js
 ```
 
-**每次改动 js/ 或 style 后，把文件名里的 `v2` 递增（并同步改 `index.html`、各模块的 import、`sw.v2.js` 的 PRECACHE 与 CACHE 名）。
-只改内容不改文件名，边缘节点可能继续发旧代码**，这在真机上是「改了没生效」的经典错觉。
+**每次改动 js/ 或 style 后，把文件名里的版本号递增（并同步改 `index.html`、各模块的 import、`sw.*.js` 的 PRECACHE 与 CACHE 名）。
+只改内容不改文件名，边缘节点会继续发旧代码**——已实测确认：同名 JS 部署 25 分钟后仍返回上一版对象，而换名的文件立刻是最新的。
+
+**旧入口名要保留为兼容壳**，否则缓存里还引用旧名字的页面会 404、白屏：
+
+```js
+// js/main.v4.js —— 一个旧入口名的兼容壳
+export * from './main.v5.js';
+```
+
+`js/main.js`、`main.v2.js`、`main.v3.js`、`main.v4.js` 现在都是这样的壳，分别给不同时期的旧页面兜底；
+样式同理（`style.css`、`style.v2.css` 里是一行 `@import url('./style.v3.css')`）。**退役旧壳的时机：确认没有旧页面还引用它。**
 
 另外加了 `.nojekyll`：GitHub Pages 默认跑 Jekyll，会忽略以下划线开头的文件/目录，静态站建议显式关掉。
 
