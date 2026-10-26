@@ -1,171 +1,120 @@
-# 架构与模块契约（frozen v1）
+# 架构与模块契约（v2 · 折叠-展开模型）
 
-> 本文件是并行开发的唯一接口真相。任何模块实现都必须**严格**遵守下述签名、坐标约定与 DOM id；
-> 需要变更契约时必须由协调者改本文件，实现方不得单方面偏离。
+> v2 取代 v1 的「实时镜像」模型。本文件是并行开发的唯一接口真相，签名/坐标/DOM id 一律不得改动。
 
-## 0. 全局约定
+## 0. 视觉基调（源自参考视频，取样自帧）
 
-- **零第三方依赖、零构建步骤**。原生 ES Modules，`<script type="module">`。禁止 CDN、禁止 npm 运行时依赖。
-- **所有资源引用必须是相对路径**（`./js/main.js`、`./style.css`）。绝不能以 `/` 开头 —— 部署在
-  GitHub Pages 项目站点 `https://<user>.github.io/papercut-web/` 下，绝对路径会 404。
-- 所有几何量以**归一化坐标**存储：单位正方形 `(0,0)` 左上、`(1,1)` 右下；圆心 `C=(0.5,0.5)`；可用半径 `r ≤ 0.5`。
-- 线宽同为归一化单位（`0.008` ≈ 画布边长的 0.8%）。
-- 目标浏览器：iOS Safari 16+ / Android Chrome 110+。只用其稳定支持的 API。
-- 中文 UI 文案，英文代码标识符。
+| 项 | 值 | 用途 |
+|---|---|---|
+| 背景 | `#E9EBE8`（暖米白） | 画布底、成品导出底 |
+| 红纸 | `#BE2428` | 折起来的纸 / 成品纸盘 |
+| 金笔（折叠态笔迹） | `#D98B3F` | 用户在红纸上画的线 |
+| 刻线（成品笔迹） | `#FFFFFF` | 展开后同一批笔迹变成「剪掉」的白线 |
+| 装饰纹 | `#FFFFFF` @ 0.5 alpha，线宽 0.0015 | 只画在折叠态红纸上（云纹 + 斜排线） |
 
-## 1. 对称模型：D_n 二面体对称
+## 1. 几何（沿用 v1）
 
-折叠数 `n ∈ {2,4,8,12}`。扇区角 `Δ = 2π/n`。
+- 折数 `n ∈ {4, 6, 8}`，标签「四角 / 六角 / 八角」，默认 6。
+- 主扇区以正上方为中心：`θ0 = -π/2`，张角 `Δ = 2π/n`，半径 `≤ 0.5`。
+- `D_n` 二面体对称：`p' = C + Rot(k·Δ)·(m=-1 ? Reflect(θ0) : I)·(p - C)`，`k ∈ [0,n)`、`m ∈ {+1,-1}`。
+- 坐标全部归一化到单位正方形（圆心 `C=(0.5,0.5)`，半径 ≤0.5），线宽同为归一化单位。
 
-- 主轴方向 **正上方**：`θ0 = -π/2`（canvas 坐标系 y 轴向下）。
-- 主扇区（用户唯一可落笔的区域）覆盖角度 `[θ0 - Δ/2, θ0 + Δ/2]`，即竖直朝上的一个楔形，
-  半径上限 `0.5`（内切圆内，保证成品始终是圆形窗花）。
-- 展开：对每个 `k ∈ [0,n)`、`m ∈ {+1,-1}`（仅 mirror 开启时）：
+## 2. 三种渲染态
 
-```
-v  = p - C
-M  = Rot(k·Δ) · (m === -1 ? Reflect(θ0) : I)
-p' = C + M·v
-```
+| mode | 画面 | 笔迹颜色 |
+|---|---|---|
+| `folded` | 米白底 + **一整块红纸楔形**（含白色装饰纹），只画这一片，不复制 | 金色 |
+| `unfold` | 楔形按 `progress ∈ [0,1]` 扇形甩开：第 k 片的旋转角 = `k·Δ·progress`，带 2 层拖影 | 金→白随 progress 过渡 |
+| `final` | 米白底 + 红纸圆盘，笔迹变白色刻线，`2n` 份对称 | 白色 |
 
-  `Reflect(θ0)` = 过圆心的轴反射 `[[cos2θ0, sin2θ0],[sin2θ0, -cos2θ0]]`；θ0=-π/2 时退化为 `[[-1,0],[0,1]]`
-  （沿竖直轴镜像）。
-- `k=0, m=+1` **必须**是恒等变换，保证「所见即所画」。
-- mirror 关闭 → 只有 `n` 份旋转副本（风车感）；开启 → `2n` 份（雪花/窗花感）。**默认开启**。
+- `final` 态**不画**装饰纹（让用户的作品是主角）。
+- `folded` 态的相机把楔形放大充满画布：楔形顶点（圆心）落在画布约 88% 高处，外弧距顶点约 0.86×画布高；水平方向按扇区半角夹取，保证整片可见不裁切。
 
-## 2. 模块 API（钉死）
-
-### js/symmetry.js —— 纯几何，无 DOM 依赖，必须能被 Node 直接 import
-```js
-export const FOLD_OPTIONS = [2, 4, 8, 12];
-export function sectorAngle(folds)                        // → Δ = 2π/n
-export function inSector(p, folds)                        // → boolean，含边界，容差 1e-9
-export function clampToSector(p, folds)                   // → {x,y}，极角夹到主扇区边界、半径夹到 ≤0.5
-export function expandMatrices(folds, mirror)             // → Matrix[]
-export function toPathCommands(points)                    // → Command[]
-export function toSvgPathD(commands)                      // → string
-export function renderDesign(ctx, strokes, opts)           // → void
-```
-
-- `Matrix = { a,b,c,d,e,f, k, m }`：归一化坐标系下的 2D 仿射（已含 C 的平移与还原），
-  语义与 `ctx.transform(a,b,c,d,e,f)` 一致，可直接喂给 canvas。
-- `Command = { op:'M'|'L'|'Q', x, y, cx?, cy? }`（`cx/cy` 仅 `Q` 用）。
-- `opts = { folds, size, mirror = true, drawGuides = false }`；`size` 是正方形画布**设备像素**边长。
-- `renderDesign` 必须自包含：进来 save、出去 restore，不污染调用方 ctx 状态；不得 clearRect
-  （背景由调用方负责）。
-- 笔迹**必须**用 `toPathCommands` 产出的同一套命令绘制 —— PNG 与 SVG 输出才会逐点一致。
-- `drawGuides: true` 额外画主扇区引导（两条虚线径向边 + 外侧圆弧 + 圆心点），仅交互预览用，导出时不得出现。
-
-**`toPathCommands` 平滑规则（PNG 与 SVG 共用，必须一致）**
-- 1 个点 → 仅 `[{op:'M'}]`（渲染器自行画实心圆点）。
-- 2 个点 → `M p0`、`L p1`。
-- ≥3 个点 → 中点二次贝塞尔：`M p0`；对每个内部点 `p[i]`，以 `p[i]` 为控制点、
-  `mid(p[i],p[i+1])` 为终点发 `Q`；最后 `L p[last]`。
-
-### js/draw.js —— 输入 / 状态 / 撤销栈（可依赖 symmetry.js）
-```js
-export function createBoard(canvas, opts)   // → Board
-```
-`opts = { folds = 8, color = '#c8102e', width = 0.008, mirror = true, paperColor = '#ffffff', onChange }`
+## 3. js/symmetry.js —— 纯几何 + 渲染（可被 Node import，顶层零 DOM）
 
 ```js
-board.setFold(n); board.setColor(hex); board.setWidth(w); board.setMirror(bool);
-board.undo(); board.redo(); board.clear();
-board.getStrokes();        // → Stroke[]（深拷贝快照）
-board.loadStrokes(arr);    // redo / 外部恢复
-board.canUndo(); board.canRedo();   // → boolean
-board.render();            // 立即重绘一帧
-board.destroy();
-board.onStateChange = fn;  // 状态变更后回调（刷新按钮可用态）
+export const FOLD_OPTIONS = [4, 6, 8];
+export const FOLD_LABELS = { 4: '四角', 6: '六角', 8: '八角' };
+export const PALETTE = { paperBg:'#E9EBE8', paper:'#BE2428', inkFolded:'#D98B3F', inkCut:'#FFFFFF' };
+
+export function sectorAngle(folds);
+export function inSector(p, folds);
+export function clampToSector(p, folds);
+export function expandMatrices(folds, mirror = true);
+export function toPathCommands(points);
+export function toSvgPathD(commands);
+
+// 折叠态相机：返回把归一化设计坐标映射到设备像素的 { scale, tx, ty }
+// 约定：screen = design * scale + t
+export function foldedCamera(folds, size);
+
+export function renderFolded(ctx, strokes, opts);
+export function renderUnfold(ctx, strokes, opts, progress);
+export function renderFinal(ctx, strokes, opts);
 ```
-`Stroke = { color: string, width: number, points: Array<{x,y}> }`（全部归一化）。
 
-**`setFold(n)` 的语义**：切换折数时，已有笔迹的偏差角按 `Δnew / Δold` **等比重映射**后再夹到新扇区，
-半径不变。该映射可逆（`2→12→2` 回到原角度，误差 ~1e-13），因此来回切换不漂移、也不把图案挤成一团。
-正在绘制中的笔画直接丢弃，不参与重映射；重映射本身不产生新的撤销条目。
+`opts = { folds, size, camera }`；`camera` 缺省时由 `foldedCamera` 计算（仅 folded/unfold 用得上）。
+- 三个 render 函数都必须**自己清屏并铺背景**（与 v1 相反，v1 由调用方铺），进来 save、出去 restore。
+- 笔迹一律用 `toPathCommands` 的同一套命令绘制（保证 PNG/SVG 与屏上一致）：`stroke` + `lineCap/lineJoin = round`，单点笔迹画半径 `width/2` 的实心圆。
+- `renderUnfold`：先按 `progress` 画拖影（`progress-0.06`、`progress-0.12`，alpha 0.22 / 0.10），再画主体；相机随 progress 从 folded 相机插值到「整圆充满画布」，用 `easeOutCubic`。
+- 红纸楔形 = 以圆心为顶点、±Δ/2、半径 0.5 的扇形填充；`final` 的红纸 = 半径 0.5 的整圆填充。
 
-**输入硬性规则**
-- 只用 Pointer Events；`pointerdown` 时若已有其它 pointer 处于按下状态 → 忽略新 pointer
-  （只认第一个触点，防多指误触），在 `pointerup`/`pointercancel` 时释放。
-- `setPointerCapture`；处理 `pointerdown` `pointermove` `pointerup` `pointercancel` `lostpointercapture`。
-- 每个点先过 `clampToSector` 再入栈；与上一点距离 `< 0.0015` 的点丢弃（去抖）。
-- 无 move 的轻点 → 1 个点的 Stroke，渲染成半径 `width/2` 的实心圆点。
-- 渲染用 `requestAnimationFrame` 合并（脏标记），不得在 `pointermove` 里同步重绘。
-- canvas 按 `devicePixelRatio` 缩放；`ResizeObserver` 监听容器尺寸变化后重建 backing store 并重绘。
-- 撤销栈上限 100；`clear()` 必须可撤销。
-- **不实现橡皮擦**（用撤销/清空覆盖需求）。
+## 4. js/draw.js —— 状态机（对外 Board）
 
-### js/export.js —— 导出（可依赖 symmetry.js）
 ```js
-export function renderToCanvas({ strokes, folds, mirror, size })   // → HTMLCanvasElement（离屏，白底）
-export async function exportPNG(opts)                              // → Promise<void>，触发下载
-export function buildSVG({ strokes, folds, mirror, size })         // → string
-export function exportSVG(opts)                                    // → void，触发下载
+export function createBoard(canvas, opts);   // opts = { folds=6, width=0.008, onChange }
 ```
-- PNG：`size` 为输出正方形边长，默认 2048，上限 4096。`canvas.toBlob('image/png')` + `<a download>`。
-- SVG：`viewBox="0 0 size size"` + `xmlns` + 白底 `<rect>`；每条展开副本一个
-  `<path fill="none" stroke-linecap="round" stroke-linejoin="round">`，`d` 来自 `toSvgPathD`，
-  线宽 `width * size`。单点笔迹输出 `<circle>`。
-- 文件名默认 `papercut-<folds>fold-<yyyymmdd-hhmm>.png` / `.svg`。
 
-### js/main.js —— 只做接线，不写业务算法
-### sw.js —— 经典脚本（不用 import），缓存名 `papercut-v1`
+```js
+board.setFold(n)      // 仅 folded 态可用；切换时按 v1 的等比重映射规则处理已有笔迹与历史栈
+board.setWidth(w)     // 0.004–0.020
+board.undo(); board.redo(); board.clear(); board.canUndo(); board.canRedo();
+board.getStrokes(); board.loadStrokes(list);
+board.getMode()       // 'folded' | 'unfolding' | 'final'
+board.finish()        // folded → 播放 ~900ms 展开动画 → final；无笔迹时忽略并返回 false
+board.restart()       // 任意态 → 清空笔迹 + folded
+board.exportSpec()    // → { strokes, folds }（供导出使用）
+board.render(); board.destroy(); board.onStateChange = fn;
+```
 
-## 3. DOM 契约（id 不可改，main.js 与 style.css 共同依赖）
+- 输入：Pointer Events，单指针状态机（只认第一根手指）+ window 级兜底释放（v1 已实现，保留）。
+- 落笔坐标从**屏幕坐标反解到归一化设计坐标**（folded 态要经过 `foldedCamera` 的逆变换），再过 `clampToSector`。
+- 只在 `folded` 态接受绘制；`unfolding` / `final` 态忽略指针。
+- 渲染用 RAF 合并；`unfolding` 期间每帧推进 progress，结束后切 `final` 并触发一次 `onStateChange`。
+- DPR 自适应、ResizeObserver、撤销栈上限 100、`clear()` 可撤销 —— 沿用 v1。
+
+## 5. js/export.js
+
+```js
+export function buildSVG({ strokes, folds, size });  // 成品态：米白底 + 红盘 + 白色刻线
+export async function exportPNG({ strokes, folds, size = 2048 });  // 触发下载
+export function exportSVG({ strokes, folds, size = 1024 });
+```
+- 只导出**成品态**（不导出折叠态、不含装饰纹、不含引导）。
+- SVG 与 PNG 必须共用 `expandMatrices` + `toPathCommands`，逐点一致；文件名 `papercut-<folds>fold-<yyyymmdd-hhmm>.<ext>`。
+- 展开后的红盘 = 半径 0.5 的圆；超过圆外的笔迹不得出现在导出里（用 `<clipPath>` 或路径裁切）。
+
+## 6. DOM 契约（id 不可改）
 
 | id | 元素 | 作用 |
 |---|---|---|
-| `#stage` | `<div>` | canvas 容器，正方形自适应 |
-| `#board` | `<canvas>` | 绘图板 |
-| `#foldGroup` | `<div role="group">` | 内含 4 个 `<button data-fold="2|4|8|12">` |
-| `#undo` `#redo` `#clear` | `<button>` | 历史操作 |
-| `#mirror` | `<button aria-pressed>` | 镜像开关 |
-| `#colors` | `<div>` | 内含 `<button class="swatch" data-color="#c8102e">` |
-| `#brushSize` | `<input type="range">` | 笔宽，映射 0.004–0.020 |
-| `#exportPng` `#exportSvg` | `<button>` | 导出 |
-| `#hint` | `<div>` | 首次提示，首次落笔后淡出 |
-| `#toast` | `<div aria-live="polite">` | 轻提示 |
-| `#install` | `<button hidden>` | `beforeinstallprompt` 时显示 |
+| `#stage` | div | canvas 容器 |
+| `#board` | canvas | 画布 |
+| `#foldGroup` | div[role=group] | 含 3 个 `<button data-fold="4\|6\|8">`，文案 四角/六角/八角 |
+| `#undo` `#redo` `#clear` | button | 折叠态可用 |
+| `#brushSize` | input[type=range] | 笔宽 |
+| `#finish` | button | 完成 → 播放展开 |
+| `#restart` | button | 重画（final 态显示） |
+| `#exportPng` `#exportSvg` | button | 保存（final 态显示） |
+| `#hint` | div | 首次落笔淡出 |
+| `#toast` | div[aria-live=polite] | 轻提示 |
+| `#install` | button[hidden] | PWA 安装 |
 
-## 4. PWA 契约
+布局：顶栏 = 标题 + 折数 tabs；底部 = 折叠态显示「笔宽 / 撤销 / 重做 / 清空 / 完成」，成品态显示「重画 / 保存 PNG / 保存 SVG」。
 
-`manifest.json`：`name` "剪纸窗花 · Papercut"、`short_name` "剪纸"、`start_url` `"./"`、`scope` `"./"`、
-`display` `"standalone"`、`orientation` `"portrait"`、`background_color` `"#ffffff"`、
-`theme_color` `"#c8102e"`、icons：`icon-192.png`(192x192)、`icon-512.png`(512x512)、
-`icon-maskable-512.png`(512x512, purpose maskable)。
-
-`sw.js`：`CACHE = 'papercut-v1'`；install 预缓存 `./`、`./index.html`、`./style.css`、`./manifest.json`、
-`./js/symmetry.js`、`./js/draw.js`、`./js/export.js`、`./js/main.js`、`./icons/icon-192.png`、
-`./icons/icon-512.png`；同源 GET 走 cache-first + 网络回填；导航请求离线回落到缓存 index.html。
-
-## 5. 文件布局
-
-```
-papercut-web/
-├── index.html
-├── style.css
-├── manifest.json
-├── sw.js
-├── package.json          # {"type":"module"} 仅为让 node --test 能直接 import ESM
-├── js/symmetry.js
-├── js/draw.js
-├── js/export.js
-├── js/main.js
-├── icons/icon-192.png  icon-512.png  icon-maskable-512.png  icon.svg
-├── tests/symmetry.test.mjs
-├── docs/ARCHITECTURE.md
-└── README.md             # 由协调者最后撰写
-```
-
-## 6. 代码风格
-
-- 2 空格缩进、单引号、统一带分号、ESM `import/export`。
-- 不写与代码重复的注释；只在算法处与浏览器怪癖处写「为什么」。
-- 不留下调试输出。
-
-## 7. 验收与自查命令
+## 7. 验收（每个 agent 自查）
 
 ```bash
-node --check js/<file>.js      # 语法（package.json type:module 下对 ESM 有效）
-node --test tests/             # 引擎单测
+node --check js/<file>.js
+node --test          # 现 17 项，v2 需继续全绿并按新语义补充
 ```
