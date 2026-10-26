@@ -1,4 +1,4 @@
-// v2 折叠-展开模型：纯几何 + 三态渲染。顶层零 DOM 依赖，只用 Math 与标准 Canvas 2D。
+// v3 折叠-展开模型：纯几何 + 三态渲染。顶层零 DOM 依赖，只用 Math 与标准 Canvas 2D。
 
 const TAU = Math.PI * 2;
 const CENTER = { x: 0.5, y: 0.5 };
@@ -14,10 +14,8 @@ const FOLD_VERTEX_Y = 0.88;
 const FOLD_REACH = 0.86;
 const FOLD_WIDTH_FILL = 0.92;
 
-// 装饰纹：白色 @ 0.5 alpha，线宽 0.0015（归一化单位）。
-const DECO_WIDTH = 0.0015;
-const DECO_ALPHA = 0.5;
-const DECO_MIN_ALPHA = 0.01;
+// 低于这个 alpha 的层直接跳过，省下一次没人看得见的绘制。
+const MIN_ALPHA = 0.01;
 
 // 镜像片是压在下面的那几层：折着时完全被盖住，展开到 0.25 才全部露出。
 const UNDER_REVEAL = 0.25;
@@ -26,9 +24,6 @@ const UNDER_REVEAL = 0.25;
 const TRAIL_LAGS = [0.12, 0.06];
 const TRAIL_ALPHAS = [0.1, 0.22];
 
-const IDENTITY = [1, 0, 0, 1, 0, 0];
-// 竖直镜像：折叠态装饰纹也按 D_n 画一份镜像，展开首帧才不会与折叠态不同。
-const MIRROR = [-1, 0, 0, 1, 1, 0];
 const FALLBACK_FOLDS = 6;
 
 export const FOLD_OPTIONS = [4, 6, 8];
@@ -238,7 +233,7 @@ function fanSectors(folds, progress) {
   return sectors;
 }
 
-// 只追加子路径，不 beginPath：装饰纹要攒成一条路径一次 stroke，重叠处才不会叠加 alpha。
+// 只追加子路径，不 beginPath：n 片楔形攒成一条路径一次 fill。
 function addWedgePath(ctx, folds) {
   const half = sectorAngle(folds) / 2;
   ctx.moveTo(CENTER.x, CENTER.y);
@@ -287,65 +282,6 @@ function resolveFolds(opts) {
   return Number.isFinite(folds) && folds > 1 ? folds : FALLBACK_FOLDS;
 }
 
-function polarPoint(radius, offset) {
-  const angle = AXIS + offset;
-  return { x: CENTER.x + radius * Math.cos(angle), y: CENTER.y + radius * Math.sin(angle) };
-}
-
-// 三条云纹带沿轴等距排开：半径 0.14 / 0.24 / 0.34，各带的张角逐步放宽，
-// 云头数同步增加（3 / 4 / 5），于是每条带里的云头在画面上一样大，三条带形成同一节奏。
-const CLOUD_BANDS = [
-  { radius: 0.14, span: 0.5, lobes: 3 },
-  { radius: 0.24, span: 0.58, lobes: 4 },
-  { radius: 0.34, span: 0.66, lobes: 5 },
-];
-
-// 一组云头：沿轴一列等宽的向外凸弧瓣，鼓高恒等于弧瓣宽的一半；
-// 两端各收一条向内卷的云尾，让这条带子有明确的起止，不再像横贯的一条长线。
-function addCloudBand(ctx, radius, halfSpan, lobes) {
-  const step = (2 * halfSpan) / lobes;
-  const amplitude = radius * step * 0.5;
-  const first = polarPoint(radius, -halfSpan);
-  ctx.moveTo(first.x, first.y);
-  for (let i = 0; i < lobes; i += 1) {
-    const from = -halfSpan + i * step;
-    const control = polarPoint(radius + amplitude, from + step / 2);
-    const end = polarPoint(radius, from + step);
-    ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
-  }
-  for (const side of [-1, 1]) {
-    const anchor = polarPoint(radius, side * halfSpan);
-    const control = polarPoint(radius - amplitude * 0.6, side * (halfSpan + step * 0.5));
-    const tail = polarPoint(radius - amplitude * 1.7, side * (halfSpan + step * 0.25));
-    ctx.moveTo(anchor.x, anchor.y);
-    ctx.quadraticCurveTo(control.x, control.y, tail.x, tail.y);
-  }
-}
-
-// 3 组云头：最外一组最高到 0.357，整组都在半径 0.5 的楔形内，也不越过楔形的两条径向边。
-function buildDecorations(ctx, folds) {
-  const half = sectorAngle(folds) / 2;
-  for (const band of CLOUD_BANDS) addCloudBand(ctx, band.radius, half * band.span, band.lobes);
-}
-
-function paintDecorations(ctx, folds, sectors, alpha) {
-  if (alpha <= DECO_MIN_ALPHA) return;
-  ctx.save();
-  ctx.beginPath();
-  for (const sector of sectors) {
-    const args = sector.args;
-    ctx.save();
-    ctx.transform(args[0], args[1], args[2], args[3], args[4], args[5]);
-    buildDecorations(ctx, folds);
-    ctx.restore();
-  }
-  ctx.globalAlpha = alpha;
-  ctx.strokeStyle = PALETTE.inkCut;
-  ctx.lineWidth = DECO_WIDTH;
-  ctx.stroke();
-  ctx.restore();
-}
-
 function paintStrokes(ctx, strokes, color) {
   for (const stroke of strokes) {
     const commands = toPathCommands(stroke.points);
@@ -373,11 +309,10 @@ function paintFan(ctx, strokes, folds, progress, cam, options) {
   ctx.fillStyle = PALETTE.paper;
   ctx.fill();
   ctx.clip();
-  paintDecorations(ctx, folds, sectors, options.alpha * options.decoAlpha);
   const under = Math.min(1, progress / UNDER_REVEAL);
   for (const sector of sectors) {
     const alpha = sector.m === 1 ? 1 : under;
-    if (alpha < DECO_MIN_ALPHA) continue;
+    if (alpha < MIN_ALPHA) continue;
     ctx.save();
     ctx.globalAlpha = options.alpha * alpha;
     ctx.transform(sector.args[0], sector.args[1], sector.args[2], sector.args[3], sector.args[4], sector.args[5]);
@@ -401,7 +336,6 @@ export function renderFolded(ctx, strokes, opts = {}) {
   ctx.fillStyle = PALETTE.paper;
   ctx.fill();
   ctx.clip();
-  paintDecorations(ctx, folds, [{ args: IDENTITY }, { args: MIRROR }], DECO_ALPHA);
   paintStrokes(ctx, strokes || [], PALETTE.inkFolded);
   ctx.restore();
 }
@@ -419,16 +353,14 @@ export function renderUnfold(ctx, strokes, opts = {}, progress = 0) {
   for (let i = 0; i < TRAIL_LAGS.length; i += 1) {
     const lag = p - TRAIL_LAGS[i];
     const alpha = TRAIL_ALPHAS[i] * (1 - p);
-    if (lag < 0 || alpha <= DECO_MIN_ALPHA) continue;
+    if (lag < 0 || alpha <= MIN_ALPHA) continue;
     paintFan(ctx, strokes || [], folds, lag, lerpCamera(from, to, easeOutCubic(lag)), {
       alpha,
-      decoAlpha: DECO_ALPHA * (1 - lag),
       ink: inkColor(lag),
     });
   }
   paintFan(ctx, strokes || [], folds, p, lerpCamera(from, to, easeOutCubic(p)), {
     alpha: 1,
-    decoAlpha: DECO_ALPHA * (1 - p),
     ink: inkColor(p),
   });
   ctx.restore();

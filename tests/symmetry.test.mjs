@@ -15,13 +15,12 @@ import {
   renderFolded,
   renderUnfold,
   renderFinal,
-} from '../js/symmetry.v2.js';
-import { buildSVG } from '../js/export.v2.js';
+} from '../js/symmetry.v3.js';
+import { buildSVG } from '../js/export.v3.js';
 
 const CENTER = { x: 0.5, y: 0.5 };
 const AXIS = -Math.PI / 2;
 const TAU = Math.PI * 2;
-const DECO_WIDTH = 0.0015;
 
 const STROKES = [
   { width: 0.008, points: [{ x: 0.5, y: 0.2 }, { x: 0.55, y: 0.3 }, { x: 0.48, y: 0.38 }] },
@@ -148,12 +147,10 @@ function strokeCalls(ctx) {
   return ctx.named('stroke');
 }
 
-function inkStrokes(ctx) {
-  return strokeCalls(ctx).filter((call) => call.style.lineWidth !== DECO_WIDTH);
-}
-
-function decoStrokes(ctx) {
-  return strokeCalls(ctx).filter((call) => call.style.lineWidth === DECO_WIDTH);
+// 红纸上的白装饰纹当初就是拿 PALETTE.inkCut 描的；折叠/展开态的笔迹走 PALETTE.inkFolded
+// 与 mixHex 生成的 rgb(...) 字符串，所以「没有任何 stroke 用这个颜色」= 没有任何装饰纹。
+function whiteDecoStrokes(ctx) {
+  return strokeCalls(ctx).filter((call) => call.style.strokeStyle === PALETTE.inkCut);
 }
 
 function paintedColors(ctx) {
@@ -439,7 +436,7 @@ test('foldedCamera：顶点落在画布 85%~92% 高处，楔形最宽处不越�
   assert.deepEqual(Object.keys(identityCam).sort(), ['scale', 'tx', 'ty']);
 });
 
-test('renderFolded：只画一份笔迹、铺背景、裁剪装饰纹', () => {
+test('renderFolded：只画一份笔迹、铺背景，没有任何装饰纹', () => {
   const folds = 6;
   const size = 366;
   const ctx = createFakeCtx();
@@ -449,40 +446,55 @@ test('renderFolded：只画一份笔迹、铺背景、裁剪装饰纹', () => {
   assert.equal(ctx.count('clearRect'), 1);
   assert.equal(ctx.count('fillRect'), 1);
   assert.equal(ctx.named('fillRect')[0].style.fillStyle, PALETTE.paperBg);
-  assert.ok(ctx.count('clip') >= 1, '装饰纹要裁在楔形内');
+  assert.equal(ctx.count('clip'), 1, '笔迹裁在楔形内');
 
   const cam = foldedCamera(folds, size);
   assert.deepEqual(ctx.named('transform')[0].args, [cam.scale, 0, 0, cam.scale, cam.tx, cam.ty]);
 
-  const ink = inkStrokes(ctx);
+  const ink = strokeCalls(ctx);
   assert.equal(ink.length, STROKES.length, '只画这一片，不复制');
   assert.ok(ink.length < 2 * folds * STROKES.length);
   for (const call of ink) assert.equal(call.style.strokeStyle, PALETTE.inkFolded);
 
-  const deco = decoStrokes(ctx);
-  assert.equal(deco.length, 1, '装饰纹合并成一条路径');
-  assert.equal(deco[0].style.strokeStyle, PALETTE.inkCut);
-  assertClose(deco[0].style.globalAlpha, 0.5, 'deco alpha');
-  assert.equal(ctx.count('stroke'), STROKES.length + 1);
-  assert.equal(ctx.count('quadraticCurveTo') > 0, true, '云纹走二次曲线');
+  // 折叠态只剩「红楔形 + 金色笔迹」：没有白纹，也没有第二条 path。
+  assert.equal(ctx.count('fill'), 1, '红楔形一次 fill，此外无填充');
+  assert.equal(whiteDecoStrokes(ctx).length, 0, '白色装饰线已全删');
+  assert.deepEqual(paintedColors(ctx), [PALETTE.inkFolded, PALETTE.paper, PALETTE.paperBg].sort(), '只出现背景/红纸/金笔三种颜色');
+  assert.equal(
+    ctx.count('quadraticCurveTo'),
+    STROKES.filter((stroke) => stroke.points.length >= 3).length,
+    '二次曲线只来自笔迹（>=3 点的那条走 Q）',
+  );
 
   const empty = createFakeCtx();
   renderFolded(empty, [], { folds, size });
-  assert.equal(empty.count('stroke'), 1, '无笔迹时只剩装饰纹');
-  assert.equal(inkStrokes(empty).length, 0);
+  assert.equal(empty.count('stroke'), 0, '无笔迹时一次 stroke 都不该有');
+  assert.equal(empty.count('quadraticCurveTo'), 0, '无笔迹时没有任何装饰曲线');
+  assert.equal(empty.count('lineTo'), 0, '也没有折线');
+  assert.equal(whiteDecoStrokes(empty).length, 0);
+  assert.deepEqual(paintedColors(empty), [PALETTE.paper, PALETTE.paperBg].sort(), '只剩背景与红纸');
 });
 
-test('renderFolded：所有绘制几何都落在楔形内', () => {
+test('renderFolded：无笔迹时只画楔形本体，一条装饰几何都不产生', () => {
   for (const folds of FOLD_OPTIONS) {
+    const tag = 'folds=' + folds;
     const ctx = createFakeCtx();
     renderFolded(ctx, [], { folds, size: 400 });
+    assert.equal(ctx.count('moveTo'), 1, '只有楔形顶点一个 moveTo: ' + tag);
+    assert.equal(ctx.count('arc'), 1, '只有楔形外弧一条 arc: ' + tag);
+    assert.equal(ctx.count('closePath'), 1, '楔形闭合一次: ' + tag);
+    assert.equal(ctx.count('quadraticCurveTo'), 0, '云纹那组二次曲线已删除: ' + tag);
+    assert.equal(ctx.count('lineTo'), 0, '没有任何折线: ' + tag);
+    assert.equal(ctx.count('stroke'), 0, '既没有笔迹也没有装饰纹: ' + tag);
+    assert.equal(ctx.count('fill'), 1, '只填红楔形本体: ' + tag);
+
+    // 剩下的几何就是楔形自身：顶点与半径 0.5 的外弧，全部落在楔形内。
     const samples = pathSamples(ctx);
-    assert.ok(samples.length > 20, 'decorations produce geometry');
-    assert.equal(ctx.count('lineTo'), 0, '装饰纹只剩云纹带，斜排线那组直线已删除');
+    assert.ok(samples.length >= 10, '楔形自身的采样点: ' + tag);
     for (const point of samples) {
       const radius = Math.hypot(point.x - CENTER.x, point.y - CENTER.y);
-      assert.ok(radius <= 0.5 + 1e-9, 'radius ' + radius + ' folds=' + folds);
-      assert.ok(inSector(point, folds), 'outside wedge (' + point.x + ',' + point.y + ') folds=' + folds);
+      assert.ok(radius <= 0.5 + 1e-9, 'radius ' + radius + ' ' + tag);
+      assert.ok(inSector(point, folds), 'outside wedge (' + point.x + ',' + point.y + ') ' + tag);
     }
   }
 });
@@ -497,7 +509,7 @@ test('renderFinal：2n 份白色刻线、红盘、无装饰纹', () => {
   assert.equal(ctx.count('clearRect'), 1);
   assert.equal(ctx.named('fillRect')[0].style.fillStyle, PALETTE.paperBg);
   assert.equal(ctx.count('stroke'), 2 * folds * STROKES.length);
-  assert.equal(inkStrokes(ctx).length, 2 * folds * STROKES.length);
+  assert.equal(strokeCalls(ctx).length, 2 * folds * STROKES.length);
   for (const call of ctx.named('stroke')) assert.equal(call.style.strokeStyle, PALETTE.inkCut);
 
   const fills = ctx.named('fill');
@@ -549,21 +561,21 @@ test('renderUnfold：拖影层数与 progress 的关系', () => {
   assert.equal(middle.count('save'), middle.count('restore'));
   assert.equal(end.count('save'), end.count('restore'));
 
-  assert.equal(inkStrokes(end).length, single, 'progress=1 是单帧 2n 份');
-  assert.equal(inkStrokes(start).length, folds * STROKES.length, 'progress=0 只露最上面一层，镜像片被压住');
-  assert.equal(inkStrokes(start).filter((call) => call.style.globalAlpha !== 1).length, 0, 'progress=0 笔迹全不透明');
+  assert.equal(strokeCalls(end).length, single, 'progress=1 是单帧 2n 份');
+  assert.equal(strokeCalls(start).length, folds * STROKES.length, 'progress=0 只露最上面一层，镜像片被压住');
+  assert.equal(strokeCalls(start).filter((call) => call.style.globalAlpha !== 1).length, 0, 'progress=0 笔迹全不透明');
   assert.equal(
-    inkStrokes(at(0.5)).filter((call) => call.style.globalAlpha === 1).length,
+    strokeCalls(at(0.5)).filter((call) => call.style.globalAlpha === 1).length,
     single,
     'progress>=0.25 镜像片已全露出',
   );
-  assert.equal(start.count('stroke'), folds * STROKES.length + 1, 'progress=0 只有装饰纹那一条额外路径');
-  assert.equal(decoStrokes(start).length, 1);
-  assert.equal(decoStrokes(end).length, 0, 'progress=1 装饰纹淡出');
+  assert.equal(start.count('stroke'), folds * STROKES.length, 'progress=0 除笔迹外没有任何额外路径');
+  assert.equal(whiteDecoStrokes(start).length, 0, '展开首帧没有白色装饰线');
+  assert.equal(whiteDecoStrokes(end).length, 0, 'progress=1 仍然没有装饰纹');
 
-  assert.equal(inkStrokes(middle).length, 3 * single, 'progress=0.5 有 2 层拖影 + 主体');
+  assert.equal(strokeCalls(middle).length, 3 * single, 'progress=0.5 有 2 层拖影 + 主体');
   assert.ok(middle.count('stroke') > end.count('stroke'), '拖影让绘制次数变多');
-  assert.equal(middle.count('stroke'), 3 * single + 3);
+  assert.equal(middle.count('stroke'), 3 * single, '每层只有笔迹，没有装饰纹那条额外路径');
   const trailAlphas = middle.named('stroke').map((call) => call.style.globalAlpha);
   assert.ok(trailAlphas.includes(0.11), 'lag 0.06 的拖影 alpha 0.22*(1-0.5)');
   assert.ok(trailAlphas.includes(0.05), 'lag 0.12 的拖影 alpha 0.10*(1-0.5)');
@@ -579,7 +591,7 @@ test('renderUnfold：笔迹颜色 p<0.65 保持金色，p∈[0.65,1] 才金→�
   const at = (progress) => {
     const ctx = createFakeCtx();
     renderUnfold(ctx, STROKES, { folds: 6, size: 400 }, progress);
-    return inkStrokes(ctx).map((call) => call.style.strokeStyle);
+    return strokeCalls(ctx).map((call) => call.style.strokeStyle);
   };
   const gold = 'rgb(217, 139, 63)';
   assert.equal(at(0)[0], gold);
@@ -740,8 +752,8 @@ test('renderUnfold：纸的路径只用 n 片楔形，笔迹仍按 2n 份复制'
         }
       }
       const layers = progress === 1 ? 1 : 3;
-      assert.equal(inkStrokes(ctx).length, layers * 2 * folds * STROKES.length, '每层笔迹仍复制 2n 份: ' + tag);
-      assert.equal(decoStrokes(ctx).length, progress === 1 ? 0 : fills.length, '装饰纹每层一条路径: ' + tag);
+      assert.equal(strokeCalls(ctx).length, layers * 2 * folds * STROKES.length, '每层笔迹仍复制 2n 份: ' + tag);
+      assert.equal(whiteDecoStrokes(ctx).length, 0, '任何一层纸都没有装饰纹: ' + tag);
     }
   }
 });

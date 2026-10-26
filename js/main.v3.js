@@ -1,5 +1,5 @@
-import { createBoard } from './draw.v2.js';
-import { exportPNG, exportSVG } from './export.v2.js';
+import { createBoard } from './draw.v3.js';
+import { exportPNG, exportSVG } from './export.v3.js';
 
 const MIN_WIDTH = 0.004;
 const MAX_WIDTH = 0.02;
@@ -139,7 +139,7 @@ function registerServiceWorker() {
   if (!/^https?:$/.test(location.protocol)) return;
   if (!('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.v2.js').catch(() => {
+    navigator.serviceWorker.register('./sw.v3.js').catch(() => {
       showToast('离线缓存未启用');
     });
   });
