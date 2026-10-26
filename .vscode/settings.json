@@ -1,0 +1,11 @@
+{
+  "liveServer.settings.port": 5500,
+  "liveServer.settings.donotOpenBrowser": true,
+  "liveServer.settings.donotShowInfoMsg": true,
+  "liveServer.settings.root": "/",
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "html.format.wrapLineLength": 0
+}

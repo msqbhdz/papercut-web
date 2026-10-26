@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#c8102e">
+  <meta name="description" content="在朝上的扇形里画一笔，展开成对称的剪纸窗花。纯前端、可离线使用。">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="剪纸">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>剪纸窗花 · Papercut</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/icon-180.png">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="brand"><span class="brand-mark" aria-hidden="true"></span>剪纸窗花</h1>
+    <button id="install" class="btn btn-chip" type="button" hidden>安装到桌面</button>
+  </header>
+
+  <main class="stage-wrap">
+    <div id="stage">
+      <canvas id="board" aria-label="剪纸画板，请在朝上的扇形里落笔">你的浏览器不支持 canvas。</canvas>
+    </div>
+    <div id="hint" class="hint">在朝上的扇形里画一笔<br>窗花会自动展开成对称图案</div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </main>
+
+  <footer class="toolbar">
+    <div class="row">
+      <div id="foldGroup" class="segmented" role="group" aria-label="折叠份数">
+        <button type="button" data-fold="2" aria-pressed="false">2</button>
+        <button type="button" data-fold="4" aria-pressed="false">4</button>
+        <button type="button" data-fold="8" class="is-active" aria-pressed="true">8</button>
+        <button type="button" data-fold="12" aria-pressed="false">12</button>
+      </div>
+      <button id="mirror" class="btn btn-toggle" type="button" aria-pressed="true">镜像</button>
+    </div>
+
+    <div class="row">
+      <div id="colors" class="palette" role="group" aria-label="颜色">
+        <button class="swatch is-active" type="button" data-color="#c8102e" style="--swatch: #c8102e" aria-label="中国红" aria-pressed="true"></button>
+        <button class="swatch" type="button" data-color="#d8a63a" style="--swatch: #d8a63a" aria-label="金" aria-pressed="false"></button>
+        <button class="swatch" type="button" data-color="#1a1a1a" style="--swatch: #1a1a1a" aria-label="墨黑" aria-pressed="false"></button>
+        <button class="swatch" type="button" data-color="#0f766e" style="--swatch: #0f766e" aria-label="松绿" aria-pressed="false"></button>
+        <button class="swatch" type="button" data-color="#2f5fa8" style="--swatch: #2f5fa8" aria-label="靛蓝" aria-pressed="false"></button>
+        <button class="swatch" type="button" data-color="#7a3fa0" style="--swatch: #7a3fa0" aria-label="紫" aria-pressed="false"></button>
+      </div>
+    </div>
+
+    <div class="row">
+      <label class="brush">
+        <span class="brush-label">笔宽</span>
+        <input id="brushSize" type="range" min="0" max="100" step="1" value="25" aria-label="笔画粗细">
+      </label>
+      <button id="undo" class="btn" type="button" disabled>撤销</button>
+      <button id="redo" class="btn" type="button" disabled>重做</button>
+      <button id="clear" class="btn" type="button" disabled>清空</button>
+    </div>
+
+    <div class="row">
+      <button id="exportPng" class="btn btn-primary" type="button">保存 PNG</button>
+      <button id="exportSvg" class="btn btn-outline" type="button">保存 SVG</button>
+    </div>
+  </footer>
+
+  <div id="boot" class="boot">
+    <div class="boot-card" role="alertdialog" aria-modal="true" aria-labelledby="bootTitle">
+      <h2 id="bootTitle">需要用本地服务器打开</h2>
+      <p>双击打开时地址栏是 <code>file://</code>，浏览器会拦截 ES 模块，页面因此没能启动。</p>
+      <ol class="boot-steps">
+        <li>在 VSCode 里右键 <code>index.html</code>，选「Open with Live Server」，它会开在端口 5500。</li>
+        <li>或在项目目录自己起一个静态服务器，让它监听同一个 5500 端口，再访问 <code>localhost:5500</code>。</li>
+      </ol>
+      <button class="btn btn-primary" type="button" data-boot-close>知道了</button>
+    </div>
+  </div>
+
+  <noscript>
+    <div class="boot is-on">
+      <div class="boot-card">
+        <h2>需要 JavaScript</h2>
+        <p>本应用全部在浏览器本地运行，请允许 JavaScript 后重新加载。</p>
+      </div>
+    </div>
+  </noscript>
+
+  <script>
+    (function () {
+      var boot = document.getElementById('boot');
+      var timer = window.setTimeout(function () {
+        if (!window.__papercutBooted) boot.classList.add('is-on');
+      }, 1500);
+      boot.addEventListener('click', function (event) {
+        if (event.target.closest && event.target.closest('[data-boot-close]')) {
+          window.clearTimeout(timer);
+          boot.classList.remove('is-on');
+        }
+      });
+      if (window.__papercutBooted) window.clearTimeout(timer);
+    })();
+  </script>
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>

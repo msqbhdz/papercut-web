@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="剪纸窗花">
+  <title>剪纸窗花 · Papercut</title>
+  <rect width="512" height="512" fill="#c8102e"/>
+  <defs>
+    <g id="petal">
+      <path d="M301 256C330 224.5 415 224.5 469.8 256C415 287.5 330 287.5 301 256Z" fill="#ffffff"/>
+      <path d="M408.8 294.1A157.5 157.5 0 0 1 391 337.1" fill="none" stroke="#ffffff" stroke-width="6.8" stroke-linecap="round"/>
+      <path d="M391 174.9A157.5 157.5 0 0 1 408.8 217.9" fill="none" stroke="#ffffff" stroke-width="6.8" stroke-linecap="round"/>
+      <path d="M319.4 232.9A67.5 67.5 0 0 1 319.4 279.1" fill="none" stroke="#ffffff" stroke-width="6.3" stroke-linecap="round"/>
+      <circle cx="344" cy="274.7" r="6.75" fill="#ffffff"/>
+      <circle cx="344" cy="237.3" r="6.75" fill="#ffffff"/>
+      <circle cx="454.5" cy="338.2" r="4.95" fill="#ffffff"/>
+      <circle cx="454.5" cy="173.8" r="4.95" fill="#ffffff"/>
+    </g>
+  </defs>
+  <g>
+    <use href="#petal" transform="rotate(0 256 256)"/>
+    <use href="#petal" transform="rotate(45 256 256)"/>
+    <use href="#petal" transform="rotate(90 256 256)"/>
+    <use href="#petal" transform="rotate(135 256 256)"/>
+    <use href="#petal" transform="rotate(180 256 256)"/>
+    <use href="#petal" transform="rotate(225 256 256)"/>
+    <use href="#petal" transform="rotate(270 256 256)"/>
+    <use href="#petal" transform="rotate(315 256 256)"/>
+  </g>
+  <circle cx="256" cy="256" r="29" fill="none" stroke="#ffffff" stroke-width="9.45"/>
+  <path d="M256.0,237.6 L258.9,248.9 L269.0,243.0 L263.1,253.1 L274.4,256.0 L263.1,258.9 L269.0,269.0 L258.9,263.1 L256.0,274.4 L253.1,263.1 L243.0,269.0 L248.9,258.9 L237.6,256.0 L248.9,253.1 L243.0,243.0 L253.1,248.9 Z" fill="#e8b63a"/>
+</svg>

@@ -1,0 +1,11 @@
+{
+  "name": "papercut-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "纯前端剪纸窗花对称绘画 PWA —— 手机浏览器打开即用",
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT"
+}
