@@ -2,7 +2,7 @@
 
 在手机浏览器里画一笔，展开成一枚对称的剪纸窗花。纯前端、零依赖、可离线、可安装到桌面。
 
-**在线使用：<https://msqbhdz.github.io/papercut-web/>**
+**在线使用：<https://blog.msqbhdz.top/papercut-web/>**
 
 <p align="center"><img src="./icons/icon-512.png" width="140" alt="剪纸窗花"></p>
 
