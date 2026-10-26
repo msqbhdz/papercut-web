@@ -138,6 +138,19 @@ function handleShortcut(event) {
 function registerServiceWorker() {
   if (!/^https?:$/.test(location.protocol)) return;
   if (!('serviceWorker' in navigator)) return;
+  // 旧版 Service Worker 会把旧页面钉在缓存里。新 SW 接管（controllerchange）后自动重载一次，
+  // 用户不必自己清缓存；用一个标记防止来回刷新。
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    let reloaded = false;
+    try {
+      reloaded = window.sessionStorage.getItem('papercut_sw_reload') === '1';
+      window.sessionStorage.setItem('papercut_sw_reload', '1');
+    } catch (error) {
+      reloaded = true;
+    }
+    if (reloaded) return;
+    location.reload();
+  });
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.v4.js').catch(() => {
       showToast('离线缓存未启用');

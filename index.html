@@ -55,14 +55,22 @@
   </footer>
 
   <div id="boot" class="boot">
-    <div class="boot-card" role="alertdialog" aria-modal="true" aria-labelledby="bootTitle">
-      <h2 id="bootTitle">需要用本地服务器打开</h2>
+    <div class="boot-card" data-boot-kind="file" role="alertdialog" aria-modal="true" aria-labelledby="bootTitleFile">
+      <h2 id="bootTitleFile">需要用本地服务器打开</h2>
       <p>双击打开时地址栏是 <code>file://</code>，浏览器会拦截 ES 模块，页面因此没能启动。</p>
       <ol class="boot-steps">
         <li>在 VSCode 里右键 <code>index.html</code>，选「Open with Live Server」，它会开在端口 5500。</li>
         <li>或在项目目录自己起一个静态服务器，让它监听同一个 5500 端口，再访问 <code>localhost:5500</code>。</li>
       </ol>
       <button class="btn btn-primary" type="button" data-boot-close>知道了</button>
+    </div>
+
+    <div class="boot-card" data-boot-kind="stale" role="alertdialog" aria-modal="true" aria-labelledby="bootTitleStale">
+      <h2 id="bootTitleStale">页面没能启动</h2>
+      <p>多半是浏览器或微信里缓存着旧版本，也可能是网络没把脚本加载完。刚才已经自动重试过一次。</p>
+      <p>点下面按钮会带随机参数强制拉取最新版本；仍不行就关掉标签页重开，或在浏览器设置里清除本站数据。</p>
+      <button class="btn btn-primary" type="button" data-boot-reload>强制刷新</button>
+      <button class="btn" type="button" data-boot-close>关闭</button>
     </div>
   </div>
 
@@ -78,11 +86,40 @@
   <script>
     (function () {
       var boot = document.getElementById('boot');
+      var cards = {
+        file: boot.querySelector('[data-boot-kind="file"]'),
+        stale: boot.querySelector('[data-boot-kind="stale"]')
+      };
+      function show(kind) {
+        cards.file.style.display = kind === 'file' ? '' : 'none';
+        cards.stale.style.display = kind === 'stale' ? '' : 'none';
+        boot.classList.add('is-on');
+      }
+      function bust() {
+        var url = new URL(location.href);
+        url.searchParams.set('_r', String(Date.now()));
+        location.replace(url.toString());
+      }
+      var retried = false;
+      try { retried = window.sessionStorage.getItem('papercut_retry') === '1'; } catch (error) { retried = false; }
+
       var timer = window.setTimeout(function () {
-        if (!window.__papercutBooted) boot.classList.add('is-on');
+        if (window.__papercutBooted) return;
+        if (location.protocol === 'file:') { show('file'); return; }
+        // 网络/缓存里的旧页面会引用已改名的旧脚本而 404，先自动强制刷一次，多半就能自愈。
+        if (!retried) {
+          try { window.sessionStorage.setItem('papercut_retry', '1'); } catch (error) {}
+          bust();
+          return;
+        }
+        show('stale');
       }, 1500);
+
       boot.addEventListener('click', function (event) {
-        if (event.target.closest && event.target.closest('[data-boot-close]')) {
+        var target = event.target.closest ? event.target.closest('button') : null;
+        if (!target) return;
+        if (target.hasAttribute('data-boot-reload')) { window.clearTimeout(timer); bust(); return; }
+        if (target.hasAttribute('data-boot-close')) {
           window.clearTimeout(timer);
           boot.classList.remove('is-on');
         }
