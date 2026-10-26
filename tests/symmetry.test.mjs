@@ -15,8 +15,8 @@ import {
   renderFolded,
   renderUnfold,
   renderFinal,
-} from '../js/symmetry.js';
-import { buildSVG } from '../js/export.js';
+} from '../js/symmetry.v2.js';
+import { buildSVG } from '../js/export.v2.js';
 
 const CENTER = { x: 0.5, y: 0.5 };
 const AXIS = -Math.PI / 2;

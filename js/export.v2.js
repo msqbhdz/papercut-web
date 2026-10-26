@@ -5,7 +5,7 @@ import {
   renderFinal,
   toPathCommands,
   toSvgPathD,
-} from './symmetry.js';
+} from './symmetry.v2.js';
 
 const DEFAULT_PNG_SIZE = 2048;
 const DEFAULT_SVG_SIZE = 1024;

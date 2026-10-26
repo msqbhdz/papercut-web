@@ -1,5 +1,5 @@
-import { createBoard } from './draw.js';
-import { exportPNG, exportSVG } from './export.js';
+import { createBoard } from './draw.v2.js';
+import { exportPNG, exportSVG } from './export.v2.js';
 
 const MIN_WIDTH = 0.004;
 const MAX_WIDTH = 0.02;
