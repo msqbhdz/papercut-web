@@ -5,7 +5,7 @@ import {
   renderFinal,
   toPathCommands,
   toSvgPathD,
-} from './symmetry.v3.js';
+} from './symmetry.v4.js';
 
 const DEFAULT_PNG_SIZE = 2048;
 const DEFAULT_SVG_SIZE = 1024;
@@ -105,7 +105,6 @@ export function buildSVG({ strokes, folds, size } = {}) {
   // 红盘半径 = 0.5 设计半径 × 0.94 = 0.47 × size；clipPath 与红盘必须是同一个圆。
   const diskRadius = round2((DISK_INSET * side) / 2);
   const matrices = expandMatrices(spec.folds, true);
-  const cut = PALETTE.inkCut;
   const parts = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${side}" height="${side}" viewBox="0 0 ${side} ${side}">`,
     `<defs><clipPath id="${CLIP_ID}"><circle cx="${half}" cy="${half}" r="${diskRadius}"/></clipPath></defs>`,
@@ -113,7 +112,10 @@ export function buildSVG({ strokes, folds, size } = {}) {
     `<circle cx="${half}" cy="${half}" r="${diskRadius}" fill="${PALETTE.paper}"/>`,
     `<g clip-path="url(#${CLIP_ID})">`,
   ];
+  // 笔迹按数组顺序输出：SVG 后画的元素压在上面，剪刀因此能盖住先画的白刻线。
+  // 剪刀用底色 = 与 PNG 里 renderFinal 挖出的洞同一颜色。
   for (const stroke of spec.strokes) {
+    const color = stroke?.tool === 'cut' ? PALETTE.paperBg : PALETTE.inkCut;
     const commands = toPathCommands(stroke?.points ?? []);
     if (commands.length === 0) continue;
     if (commands.length === 1) {
@@ -121,13 +123,13 @@ export function buildSVG({ strokes, folds, size } = {}) {
       const radius = clamp(round2(((stroke.width ?? 0) * side * DISK_INSET) / 2), 0, side);
       for (const matrix of matrices) {
         const dot = projectCommand(commands[0], matrix, camera);
-        parts.push(`<circle cx="${dot.x}" cy="${dot.y}" r="${radius}" fill="${cut}"/>`);
+        parts.push(`<circle cx="${dot.x}" cy="${dot.y}" r="${radius}" fill="${color}"/>`);
       }
       continue;
     }
     // 笔宽与屏幕同源：canvas 里同样由相机缩放，故一并乘 DISK_INSET。
     const width = clamp(round2((stroke.width ?? 0) * side * DISK_INSET), 0, side);
-    const attrs = `fill="none" stroke="${cut}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"`;
+    const attrs = `fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"`;
     for (const matrix of matrices) {
       const d = toSvgPathD(commands.map((command) => projectCommand(command, matrix, camera)));
       parts.push(`<path ${attrs} d="${d}"/>`);

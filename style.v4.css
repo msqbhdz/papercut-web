@@ -1,0 +1,695 @@
+/* 红纸金笔：米白底 + 红纸 + 金线。色值与 ARCHITECTURE.md §0 一致。 */
+:root {
+  --bg: #E9EBE8;
+  --paper: #BE2428;
+  --paper-deep: #9B1A1F;
+  --ink-folded: #D98B3F;
+  --ink-cut: #FFFFFF;
+  --gold: #D98B3F;
+  --gold-soft: rgba(217, 139, 63, 0.55);
+  --gold-hair: rgba(217, 139, 63, 0.4);
+  --gold-wash: rgba(217, 139, 63, 0.14);
+  --cream: #FFFDF8;
+  --cream-deep: #F3ECDD;
+  --text: #5E2320;
+  --text-soft: #8A6A5C;
+  --shadow: 0 8px 24px rgba(94, 35, 32, 0.12);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+  /* 两套底栏共用同一高度，切换模式时画布不跳。 */
+  --bar-h: 64px;
+  /* 画布左右留白：竖屏下视口宽度才是正方形的天花板。 */
+  --stage-gap: 4px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  overscroll-behavior: none;
+  color: var(--text);
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(circle at 16% 4%, rgba(217, 139, 63, 0.12), transparent 44%),
+    radial-gradient(circle at 84% 98%, rgba(190, 36, 40, 0.08), transparent 52%);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---------- 顶栏 ---------- */
+
+.topbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  padding: calc(var(--safe-top) + 8px) 12px 6px;
+}
+
+/* 标题必须单行：不接受「剪纸窗 / 花」折行。 */
+.brand {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--paper);
+}
+
+.brand-mark {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: linear-gradient(160deg, #C82B2F, var(--paper-deep));
+  box-shadow: inset 0 0 0 1.5px var(--gold), 0 2px 6px rgba(155, 26, 31, 0.3);
+  transform: rotate(-6deg);
+}
+
+.brand-mark::after {
+  content: '';
+  position: absolute;
+  inset: 4.5px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+}
+
+.segmented {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.66);
+  border: 1px solid var(--gold-hair);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.segmented button {
+  position: relative;
+  min-width: 50px;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-soft);
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* 视觉高度 36px，热区补到 44px，够触控。 */
+.segmented button::after {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
+}
+
+.segmented button.is-active {
+  background: linear-gradient(180deg, #C82B2F, var(--paper-deep));
+  color: #FFF3E2;
+  box-shadow: 0 2px 8px rgba(155, 26, 31, 0.3), inset 0 0 0 1px rgba(217, 139, 63, 0.8);
+}
+
+.segmented button:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+#install[hidden] {
+  display: none;
+}
+
+/* 安装位缩成图标，绝不与折数 tabs 抢宽度。 */
+.chip-ico {
+  position: relative;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1.5px solid currentColor;
+}
+
+.chip-ico::before,
+.chip-ico::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: currentColor;
+}
+
+.chip-ico::before {
+  width: 6px;
+  height: 1.5px;
+  transform: translate(-50%, -50%);
+}
+
+.chip-ico::after {
+  width: 1.5px;
+  height: 6px;
+  transform: translate(-50%, -50%);
+}
+
+/* 窄屏只露图标；文案留在无障碍树里，按钮仍有可读名字。 */
+.install-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------- 画布区 ---------- */
+
+.stage-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 4px var(--stage-gap) 6px;
+}
+
+#stage {
+  container-type: size;
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+#board {
+  display: block;
+  width: min(100cqw, 100cqh);
+  height: min(100cqw, 100cqh);
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 16px;
+  background: var(--bg);
+  touch-action: none;
+  cursor: crosshair;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 0 0 1px var(--gold-hair),
+    0 12px 30px rgba(94, 35, 32, 0.14);
+}
+
+body[data-mode='final'] #board {
+  cursor: default;
+}
+
+/* 老浏览器没有尺寸容器单位时退化为撑满，仍不滚动页面。 */
+@supports not (width: 100cqw) {
+  #board {
+    width: 100%;
+    height: 100%;
+  }
+}
+
+.hint {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 9px 18px;
+  border-radius: 999px;
+  background: rgba(255, 253, 248, 0.92);
+  border: 1px solid var(--gold-hair);
+  color: var(--text-soft);
+  font-size: 12.5px;
+  line-height: 1.65;
+  text-align: center;
+  box-shadow: 0 6px 18px rgba(94, 35, 32, 0.1);
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.55s ease, transform 0.55s ease;
+}
+
+.hint.is-gone {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--safe-bottom) + var(--bar-h) + 28px);
+  z-index: 20;
+  transform: translate(-50%, 10px);
+  max-width: calc(100% - 32px);
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(217, 139, 63, 0.5);
+  background: rgba(94, 35, 32, 0.94);
+  color: #FFF3E2;
+  font-size: 13px;
+  text-align: center;
+  box-shadow: 0 10px 26px rgba(94, 35, 32, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.toast.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* ---------- 底部动作区 ---------- */
+
+.toolbar {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: calc(var(--bar-h) + var(--safe-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px var(--safe-bottom);
+}
+
+.toolbar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-soft), transparent);
+}
+
+/* 两组控件都排成单行：底栏高度与模式无关，画布因此不跳。 */
+.controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  max-width: 720px;
+  transition: opacity 0.2s ease;
+}
+
+.controls-final {
+  display: none;
+}
+
+body[data-mode='final'] .controls-fold {
+  display: none;
+}
+
+body[data-mode='final'] .controls-final {
+  display: flex;
+}
+
+/* 展开动画期间两组都退场，避免抢戏。 */
+body[data-mode='unfolding'] .controls {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.btn {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 44px;
+  min-width: 64px;
+  padding: 0 18px;
+  white-space: nowrap;
+  border-radius: 999px;
+  border: 1px solid var(--gold-hair);
+  background: linear-gradient(180deg, var(--cream), var(--cream-deep));
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  box-shadow: 0 2px 6px rgba(94, 35, 32, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  transition: transform 0.14s ease, box-shadow 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.985);
+  box-shadow: 0 1px 3px rgba(94, 35, 32, 0.14);
+}
+
+.btn:disabled {
+  opacity: 0.42;
+  cursor: default;
+  box-shadow: none;
+}
+
+.btn-primary {
+  border-color: rgba(217, 139, 63, 0.85);
+  background: linear-gradient(180deg, #C82B2F, var(--paper-deep));
+  color: #FFF7EA;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  box-shadow: 0 6px 18px rgba(155, 26, 31, 0.28), inset 0 1px 0 rgba(255, 225, 190, 0.35);
+}
+
+.btn-outline {
+  background: rgba(255, 253, 248, 0.72);
+  border-color: var(--gold-soft);
+  color: var(--paper);
+}
+
+/* 剪刀态：红面金边，和主按钮同一套配色，一眼看出手里不是笔。
+   只改颜色不改字号/字距——两种状态盒宽一致，切换时底栏不会抖一下。 */
+#tool[aria-pressed='true'] {
+  border-color: rgba(217, 139, 63, 0.85);
+  background: linear-gradient(180deg, #C82B2F, var(--paper-deep));
+  color: #FFF7EA;
+  box-shadow: 0 6px 18px rgba(155, 26, 31, 0.28), inset 0 1px 0 rgba(255, 225, 190, 0.35);
+}
+
+.btn-chip {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 36px;
+  min-width: 0;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--paper);
+}
+
+.brush {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--gold-hair);
+  background: rgba(255, 253, 248, 0.7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.brush-label {
+  font-size: 12.5px;
+  letter-spacing: 0.1em;
+  color: var(--text-soft);
+}
+
+#brushSize {
+  flex: 0 1 auto;
+  min-width: 44px;
+  width: 104px;
+  height: 24px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+#brushSize:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#brushSize::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold), rgba(190, 36, 40, 0.6));
+}
+
+#brushSize::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--gold);
+  background: linear-gradient(180deg, #FFFFFF, #F1E6D2);
+  box-shadow: 0 2px 6px rgba(94, 35, 32, 0.22);
+}
+
+#brushSize::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold), rgba(190, 36, 40, 0.6));
+}
+
+#brushSize::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--gold);
+  background: #FFFFFF;
+  box-shadow: 0 2px 6px rgba(94, 35, 32, 0.22);
+}
+
+.btn:focus-visible,
+.segmented button:focus-visible,
+#brushSize:focus-visible,
+#install:focus-visible {
+  outline: 2px solid rgba(217, 139, 63, 0.9);
+  outline-offset: 2px;
+}
+
+/* ---------- file:// 启动兜底 ---------- */
+
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(233, 235, 232, 0.94);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.boot.is-on {
+  display: flex;
+}
+
+.boot-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 22px 22px 18px;
+  border-radius: 20px;
+  background: var(--cream);
+  border: 1px solid var(--gold-soft);
+  box-shadow: 0 18px 48px rgba(94, 35, 32, 0.2);
+}
+
+.boot-card h2 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  letter-spacing: 0.08em;
+  color: var(--paper);
+}
+
+.boot-card p {
+  margin: 0 0 12px;
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--text-soft);
+}
+
+.boot-steps {
+  margin: 0 0 16px;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.85;
+  color: var(--text-soft);
+}
+
+.boot-card code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--gold-wash);
+  color: #8A4B16;
+  font-size: 12.5px;
+}
+
+.boot-card .btn {
+  width: 100%;
+}
+
+/* ---------- 窄屏与矮屏 ---------- */
+
+/* 手机竖屏：底栏必须压在一行里，否则高度一变画布就跳。 */
+@media (max-width: 480px) {
+  .controls {
+    gap: 6px;
+  }
+
+  .btn {
+    min-width: 44px;
+    padding: 0 10px;
+    font-size: 13.5px;
+  }
+
+  .brush {
+    gap: 6px;
+    padding: 0 10px;
+  }
+
+  .brush-label {
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+  }
+
+  #brushSize {
+    width: 60px;
+  }
+}
+
+/* 390px 一类窄屏要在一行里塞下六个控件：笔宽 + 工具 + 撤销 + 重做 + 清空 + 完成。
+   换行会改底栏高度、画布跟着跳，所以这里把「笔宽」两个字让出来（可访问名仍在
+   #brushSize 的 aria-label 上），并收窄按钮的水平内边距与滑杆。 */
+@media (max-width: 450px) {
+  .controls {
+    gap: 5px;
+  }
+
+  .btn {
+    padding: 0 8px;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+  }
+
+  .brush {
+    gap: 5px;
+    padding: 0 8px;
+  }
+
+  .brush-label {
+    display: none;
+  }
+
+  #brushSize {
+    width: 54px;
+  }
+}
+
+/* 安装入口只在手机出现：电脑端把整个按钮藏掉，避免被当成来路不明的弹窗。 */
+@media (min-width: 481px) {
+  #install {
+    display: none;
+  }
+}
+
+@media (max-width: 380px) {
+  .topbar {
+    gap: 6px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .brand {
+    font-size: 15px;
+  }
+
+  #install.btn-chip {
+    padding: 0 8px;
+  }
+
+  .btn {
+    padding: 0 8px;
+    font-size: 13px;
+  }
+
+  /* 笔画粗细的可访问名由 aria-label 提供，这里把 30px 让给按钮。 */
+  .brush-label {
+    display: none;
+  }
+
+  #brushSize {
+    width: 56px;
+  }
+}
+
+@media (max-width: 340px) {
+  .brand-mark {
+    display: none;
+  }
+
+  /* 320~340px：再让掉几个像素，六个控件仍是一行。按钮高度不变，热区仍是 44px。 */
+  .controls {
+    gap: 4px;
+  }
+
+  .btn {
+    min-width: 40px;
+    padding: 0 6px;
+  }
+
+  .brush {
+    padding: 0 6px;
+  }
+
+  #brushSize {
+    width: 44px;
+  }
+}
+
+@media (max-height: 560px) {
+  .topbar {
+    padding-top: calc(var(--safe-top) + 4px);
+    padding-bottom: 4px;
+  }
+
+  .toolbar {
+    --bar-h: 56px;
+  }
+
+  .hint {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .segmented button,
+  .hint,
+  .toast,
+  .controls {
+    transition-duration: 0.01ms;
+  }
+}

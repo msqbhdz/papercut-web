@@ -1,4 +1,5 @@
-// v3 折叠-展开模型：纯几何 + 三态渲染。顶层零 DOM 依赖，只用 Math 与标准 Canvas 2D。
+// v4 折叠-展开模型：纯几何 + 三态渲染。顶层零 DOM 依赖，只用 Math 与标准 Canvas 2D。
+// 笔迹分两种工具：draw 画金线（刻线，纸还在），cut 用底色挖掉一条带（露出底盘）。
 
 const TAU = Math.PI * 2;
 const CENTER = { x: 0.5, y: 0.5 };
@@ -282,11 +283,17 @@ function resolveFolds(opts) {
   return Number.isFinite(folds) && folds > 1 ? folds : FALLBACK_FOLDS;
 }
 
+// 剪刀笔迹在所有渲染态里都用底色画（把纸挖掉），不参与任何金→白插值。
+function isCut(stroke) {
+  return Boolean(stroke) && stroke.tool === 'cut';
+}
+
+// 按数组顺序逐条画：后画的剪刀因此能盖住先画的金线（剪掉时连纸上的线一起去掉）。
 function paintStrokes(ctx, strokes, color) {
   for (const stroke of strokes) {
     const commands = toPathCommands(stroke.points);
     if (commands.length === 0) continue;
-    paintStroke(ctx, commands, stroke.width, color);
+    paintStroke(ctx, commands, stroke.width, isCut(stroke) ? PALETTE.paperBg : color);
   }
 }
 

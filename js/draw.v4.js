@@ -5,7 +5,7 @@ import {
   renderFolded,
   renderUnfold,
   sectorAngle,
-} from './symmetry.v3.js';
+} from './symmetry.v4.js';
 
 const MIN_POINT_DISTANCE = 0.0015;
 const MAX_UNDO_DEPTH = 100;
@@ -14,6 +14,7 @@ const MIN_WIDTH = 0.004;
 const MAX_WIDTH = 0.02;
 const DEFAULT_FOLDS = 6;
 const DEFAULT_WIDTH = 0.008;
+const DEFAULT_TOOL = 'draw';
 const TAU = Math.PI * 2;
 // 归一化圆心与「正上方」径向：canvas 的 y 轴向下，所以正上方是 -π/2。
 const CENTER = { x: 0.5, y: 0.5 };
@@ -45,9 +46,11 @@ function remapPoints(points, oldFolds, newFolds) {
   return points.map((point) => remapPoint(point, oldFolds, newFolds));
 }
 
+// 工具是笔迹的属性，折叠重映射只换坐标，不能把它丢掉。
 function remapStrokes(list, oldFolds, newFolds) {
   return list.map((stroke) => ({
     color: stroke.color,
+    tool: normalizeTool(stroke.tool),
     width: stroke.width,
     points: remapPoints(stroke.points, oldFolds, newFolds),
   }));
@@ -72,10 +75,16 @@ function clampWidth(value) {
   return Math.min(Math.max(width, MIN_WIDTH), MAX_WIDTH);
 }
 
+// 缺省与任何未知值都退回 'draw'：旧数据（没有 tool 字段）因此仍然画金线。
+function normalizeTool(value) {
+  return value === 'cut' ? 'cut' : DEFAULT_TOOL;
+}
+
 export function createBoard(canvas, opts = {}) {
   const {
     folds: initialFolds = DEFAULT_FOLDS,
     width: initialWidth = DEFAULT_WIDTH,
+    tool: initialTool = DEFAULT_TOOL,
     onChange = null,
   } = opts;
 
@@ -93,6 +102,7 @@ export function createBoard(canvas, opts = {}) {
 
   let folds = normalizeFolds(initialFolds);
   let strokeWidth = clampWidth(initialWidth);
+  let tool = normalizeTool(initialTool);
   let mode = 'folded';
   let progress = 0;
 
@@ -121,6 +131,7 @@ export function createBoard(canvas, opts = {}) {
   function cloneStrokes(list) {
     return list.map((stroke) => ({
       color: stroke.color,
+      tool: normalizeTool(stroke.tool),
       width: stroke.width,
       points: stroke.points.map((point) => ({ x: point.x, y: point.y })),
     }));
@@ -256,7 +267,8 @@ export function createBoard(canvas, opts = {}) {
     const point = designFrom(event);
     if (!point) return;
     activePointer = event.pointerId;
-    liveStroke = { width: strokeWidth, points: [point] };
+    // 工具在落笔那一刻定格：之后切工具只影响后面的笔迹。
+    liveStroke = { tool, width: strokeWidth, points: [point] };
     try {
       canvas.setPointerCapture(event.pointerId);
     } catch {
@@ -306,6 +318,18 @@ export function createBoard(canvas, opts = {}) {
     if (value === strokeWidth) return;
     strokeWidth = value;
     emit();
+  }
+
+  // 只改下一次落笔用的工具，已画的笔迹一律不动。
+  function setTool(next) {
+    const value = normalizeTool(next);
+    if (value === tool) return;
+    tool = value;
+    emit();
+  }
+
+  function getTool() {
+    return tool;
   }
 
   function undo() {
@@ -427,6 +451,8 @@ export function createBoard(canvas, opts = {}) {
     onStateChange: typeof onChange === 'function' ? onChange : null,
     setFold,
     setWidth,
+    setTool,
+    getTool,
     undo,
     redo,
     clear,

@@ -1,19 +1,19 @@
 'use strict';
 
 // 经典脚本：不使用 import/export，避免在无构建的项目里引入模块边界。
-const CACHE = 'papercut-v8';
+const CACHE = 'papercut-v9';
 const ENTRY = './index.html';
 
 // 与 index.html 的引用（含其 import 图）逐一对应；部署在 /papercut-web/ 子路径下，全部相对。
 const PRECACHE = [
   './',
   './index.html',
-  './style.v3.css',
+  './style.v4.css',
   './manifest.json',
-  './js/symmetry.v3.js',
-  './js/draw.v3.js',
-  './js/export.v3.js',
-  './js/main.v5.js',
+  './js/symmetry.v4.js',
+  './js/draw.v4.js',
+  './js/export.v4.js',
+  './js/main.v6.js',
   './icons/icon.svg',
   './icons/icon-180.png',
   './icons/icon-192.png',

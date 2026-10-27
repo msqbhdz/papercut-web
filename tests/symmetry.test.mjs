@@ -15,8 +15,8 @@ import {
   renderFolded,
   renderUnfold,
   renderFinal,
-} from '../js/symmetry.v3.js';
-import { buildSVG } from '../js/export.v3.js';
+} from '../js/symmetry.v4.js';
+import { buildSVG } from '../js/export.v4.js';
 
 const CENTER = { x: 0.5, y: 0.5 };
 const AXIS = -Math.PI / 2;
@@ -860,3 +860,134 @@ test('buildSVG：红盘与 clipPath 同一圆，path 坐标与 renderFinal 相�
   assertClose(dots[2][0], cam[0] * 0.5 + cam[4], '第一个点的 cx 已经内缩', 0.01);
   assertClose(dots[2][1], cam[0] * 0.25 + cam[4], '第一个点的 cy 已经内缩', 0.01);
 });
+
+// 剪刀笔迹：tool==='cut' 用底色把纸挖掉（露出底盘），draw 照旧上金/白。
+// 数组顺序就是绘制顺序——后画的剪刀因此盖得住先画的金线。
+const MIXED_STROKES = [
+  { tool: 'draw', width: 0.008, points: [{ x: 0.5, y: 0.2 }, { x: 0.55, y: 0.3 }, { x: 0.48, y: 0.38 }] },
+  { tool: 'cut', width: 0.012, points: [{ x: 0.44, y: 0.22 }, { x: 0.5, y: 0.3 }] },
+];
+
+const GOLD = 'rgb(217, 139, 63)';
+const WHITE = 'rgb(255, 255, 255)';
+
+function strokeColors(ctx) {
+  return strokeCalls(ctx).map((call) => call.style.strokeStyle);
+}
+
+test('renderFolded：cut 笔迹用 paperBg 挖白，并按笔迹顺序画在 draw 之后', () => {
+  const folds = 6;
+  const size = 366;
+  const ctx = createFakeCtx();
+  renderFolded(ctx, MIXED_STROKES, { folds, size });
+
+  const painted = strokeCalls(ctx);
+  assert.equal(painted.length, 2, '折叠态每条笔迹只画一次');
+  assert.deepEqual(strokeColors(ctx), [PALETTE.inkFolded, PALETTE.paperBg], 'draw 金色 / cut 底色');
+  for (const call of painted) {
+    assert.equal(call.style.lineCap, 'round', '圆头线帽');
+    assert.equal(call.style.lineJoin, 'round', '圆角连接');
+  }
+
+  // 顺序证据：两次 stroke 在调用序列里的下标递增，剪刀那次排在金线之后。
+  const drawIndex = ctx.calls.findIndex(
+    (call) => call.name === 'stroke' && call.style.strokeStyle === PALETTE.inkFolded,
+  );
+  const cutIndex = ctx.calls.findIndex(
+    (call) => call.name === 'stroke' && call.style.strokeStyle === PALETTE.paperBg,
+  );
+  assert.ok(drawIndex >= 0 && cutIndex >= 0, '两种笔迹都真的被描了');
+  assert.ok(cutIndex > drawIndex, '剪刀后画才能盖住先画的金线');
+
+  // 顺序由输入决定，而不是按工具分组：换一下数组顺序，绘制顺序跟着换。
+  const swapped = createFakeCtx();
+  renderFolded(swapped, [MIXED_STROKES[1], MIXED_STROKES[0]], { folds, size });
+  assert.deepEqual(strokeColors(swapped), [PALETTE.paperBg, PALETTE.inkFolded], '笔迹顺序决定绘制顺序');
+
+  // 单点笔迹（实心圆点）同样按 tool 取色：fill[0] 是红楔形本体。
+  const dotCtx = createFakeCtx();
+  renderFolded(dotCtx, [{ tool: 'cut', width: 0.012, points: [{ x: 0.5, y: 0.3 }] }], { folds, size });
+  const dotFills = dotCtx.named('fill');
+  assert.equal(dotFills.length, 2, '红楔形 + 一个圆点');
+  assert.equal(dotFills[1].style.fillStyle, PALETTE.paperBg, '圆点也用底色挖掉');
+});
+
+test('renderFinal：混合 draw/cut，draw 是 inkCut、cut 是 paperBg，各 2n 份', () => {
+  const folds = 6;
+  const size = 400;
+  const ctx = createFakeCtx();
+  renderFinal(ctx, MIXED_STROKES, { folds, size });
+
+  const painted = strokeCalls(ctx);
+  assert.equal(painted.length, 2 * folds * MIXED_STROKES.length, '每条笔迹复制 2n 份');
+  const white = painted.filter((call) => call.style.strokeStyle === PALETTE.inkCut);
+  const holes = painted.filter((call) => call.style.strokeStyle === PALETTE.paperBg);
+  assert.equal(white.length, 2 * folds, 'draw → 白刻线，2n 份');
+  assert.equal(holes.length, 2 * folds, 'cut → 底盘色，2n 份');
+  assert.equal(white.length + holes.length, painted.length, '没有第三种颜色');
+  assert.deepEqual(paintedColors(ctx), [PALETTE.inkCut, PALETTE.paper, PALETTE.paperBg].sort(), '成品态不再出现金色');
+
+  // 单点：红盘 1 次 fill + 2n 个实心圆点，圆点按 tool 取色。
+  const dotCtx = createFakeCtx();
+  renderFinal(dotCtx, [{ tool: 'cut', width: 0.02, points: [{ x: 0.5, y: 0.25 }] }], { folds: 4, size });
+  const dotFills = dotCtx.named('fill');
+  assert.equal(dotFills.length, 1 + 2 * 4, '红盘 + 2n 个圆点');
+  assert.equal(dotFills[0].style.fillStyle, PALETTE.paper, '底盘仍是红纸');
+  for (const call of dotFills.slice(1)) assert.equal(call.style.fillStyle, PALETTE.paperBg, '挖出的圆点');
+});
+
+test('renderUnfold：cut 笔迹在 p=0/1 恒为 paperBg，draw 仍从金过渡到白', () => {
+  const folds = 6;
+  const size = 400;
+  const at = (progress) => {
+    const ctx = createFakeCtx();
+    renderUnfold(ctx, MIXED_STROKES, { folds, size }, progress);
+    return ctx;
+  };
+
+  // 每个扇区都按「先 draw 后 cut」成对画：剪刀数与画笔数相等，且剪刀永远是底色。
+  for (const progress of [0, 0.25, 0.5, 0.825, 1]) {
+    const colors = strokeColors(at(progress));
+    const holes = colors.filter((color) => color === PALETTE.paperBg);
+    assert.equal(holes.length, colors.length / 2, '一半是剪刀: p=' + progress);
+  }
+
+  const start = strokeColors(at(0));
+  const end = strokeColors(at(1));
+  assert.deepEqual(start.slice(0, 2), [GOLD, PALETTE.paperBg], 'p=0：draw 仍是金色，cut 是底色');
+  assert.equal(start.length, 2 * folds, 'p=0：n 片纸各一组');
+  assert.equal(start.filter((color) => color === GOLD).length, folds, 'p=0 镜像片还没露出，只有 n 份金线');
+  assert.deepEqual(end.slice(0, 4), [WHITE, PALETTE.paperBg, WHITE, PALETTE.paperBg], 'p=1：draw 已全白，cut 不变');
+  assert.equal(end.filter((color) => color === PALETTE.paperBg).length, 2 * folds, 'p=1 剪刀 2n 份');
+  assert.equal(end.filter((color) => color === WHITE).length, 2 * folds, 'p=1 画笔 2n 份全白');
+
+  // p=0.825：draw 主体过渡到金白中点，同一扇区的剪刀纹丝不动。
+  const late = strokeColors(at(0.825));
+  const [mainDraw, mainCut] = late.slice(-2);
+  assert.equal(mainDraw, 'rgb(236, 197, 159)', 'draw 主体仍是金白中点');
+  assert.equal(mainCut, PALETTE.paperBg, 'cut 不参与插值');
+});
+
+test('buildSVG：混合笔迹按 tool 取色，且输出顺序与输入一致', () => {
+  const size = 512;
+  const folds = 6;
+  const count = (text, needle) => text.split(needle).length - 1;
+
+  const svg = buildSVG({ strokes: MIXED_STROKES, folds, size });
+  assert.equal(count(svg, 'stroke="#FFFFFF"'), 2 * folds, 'draw 每份一条白刻线');
+  assert.equal(count(svg, 'stroke="#E9EBE8"'), 2 * folds, 'cut 每份一条挖白');
+  assert.ok(svg.indexOf('stroke="#FFFFFF"') < svg.indexOf('stroke="#E9EBE8"'), '先画的 draw 排在前面');
+  assert.ok(
+    svg.indexOf('<g clip-path="url(#papercut-disk)">') < svg.indexOf('stroke="#FFFFFF"'),
+    '所有笔迹都在红盘 clipPath 内',
+  );
+
+  // 顺序随输入：把剪刀放前面，输出的两种颜色也跟着调头。
+  const swapped = buildSVG({ strokes: [MIXED_STROKES[1], MIXED_STROKES[0]], folds, size });
+  assert.ok(swapped.indexOf('stroke="#E9EBE8"') < swapped.indexOf('stroke="#FFFFFF"'), '后画的 draw 排在后面');
+
+  // 单点：<circle> 同样按 tool 取色（背景 rect 也吃 fill="#E9EBE8"，故 1 + 2n）。
+  const dotSvg = buildSVG({ strokes: [{ tool: 'cut', width: 0.02, points: [{ x: 0.5, y: 0.25 }] }], folds: 4, size });
+  assert.equal(count(dotSvg, 'fill="#E9EBE8"'), 1 + 2 * 4, '背景 rect + 2n 个挖出的圆点');
+});
+

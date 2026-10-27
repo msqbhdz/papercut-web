@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-180.png">
-  <link rel="stylesheet" href="./style.v3.css">
+  <link rel="stylesheet" href="./style.v4.css">
 </head>
 <body data-mode="folded">
   <header class="topbar">
@@ -41,6 +41,7 @@
         <span class="brush-label">笔宽</span>
         <input id="brushSize" type="range" min="0" max="100" step="1" value="25" aria-label="笔画粗细">
       </label>
+      <button id="tool" class="btn" type="button" aria-pressed="false">画笔</button>
       <button id="undo" class="btn" type="button" disabled>撤销</button>
       <button id="redo" class="btn" type="button" disabled>重做</button>
       <button id="clear" class="btn" type="button" disabled>清空</button>
@@ -127,6 +128,6 @@
       if (window.__papercutBooted) window.clearTimeout(timer);
     })();
   </script>
-  <script type="module" src="./js/main.v5.js"></script>
+  <script type="module" src="./js/main.v6.js"></script>
 </body>
 </html>
