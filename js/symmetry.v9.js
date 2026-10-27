@@ -233,14 +233,20 @@ function sectorMatrixArgs(k, m, delta, progress) {
   return [a, b, c, d, CENTER.x - (a * CENTER.x + c * CENTER.y), CENTER.y - (b * CENTER.x + d * CENTER.y)];
 }
 
-function fanSectors(folds, progress) {
+// mirror=false 时只出旋转副本（n 份）——用户画的 X 就只有一个，不再叠一份镜像。
+function fanSectors(folds, progress, mirror = true) {
   const delta = sectorAngle(folds);
   const sectors = [];
   for (let k = 0; k < folds; k += 1) {
     sectors.push({ m: 1, args: sectorMatrixArgs(k, 1, delta, progress) });
-    sectors.push({ m: -1, args: sectorMatrixArgs(k, -1, delta, progress) });
+    if (mirror) sectors.push({ m: -1, args: sectorMatrixArgs(k, -1, delta, progress) });
   }
   return sectors;
+}
+
+// 镜像开关的解析：缺省开启，只有显式 false 才关。
+function resolveMirror(opts) {
+  return opts.mirror !== false;
 }
 
 // 只追加子路径，不 beginPath：n 片楔形攒成一条路径一次 fill。
@@ -344,7 +350,7 @@ function paintStrokes(ctx, strokes, color, maxWidth = Infinity) {
 // 镜像片（det=-1）作用在楔形这个形状上与 m=1 的那片逐点重合、绕向相反，
 // 若一起进同一条路径，nonzero 规则下两块互相抵消成空，纸与裁切区都会是空的。
 function paintFan(ctx, strokes, folds, progress, cam, options) {
-  const sectors = fanSectors(folds, progress);
+  const sectors = fanSectors(folds, progress, options.mirror !== false);
   const paper = sectors.filter((sector) => sector.m === 1);
   ctx.save();
   ctx.transform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
@@ -396,7 +402,7 @@ export function renderSectorLayer(ctx, strokes, opts = {}) {
 
 // 位图版的一帧：每份副本一次 drawImage；金色层与白色层按 inkMix 交叉淡入。
 function paintFanLayer(ctx, folds, layer, progress, cam, options) {
-  const sectors = fanSectors(folds, progress);
+  const sectors = fanSectors(folds, progress, options.mirror !== false);
   const white = layer.inkCut;
   const gold = layer.inkFolded;
   const mix = inkMix(progress);
@@ -451,6 +457,7 @@ export function renderUnfold(ctx, strokes, opts = {}, progress = 0, layer = null
   const from = opts.camera || foldedCamera(folds, size);
   const to = finalCamera(size);
   const bitmapped = layer && layer.inkFolded;
+  const mirror = resolveMirror(opts);
   const drawFan = bitmapped
     ? (fanCtx, fanStrokes, fanFolds, fanProgress, cam, fanOptions) => paintFanLayer(fanCtx, fanFolds, layer, fanProgress, cam, fanOptions)
     : paintFan;
@@ -465,11 +472,13 @@ export function renderUnfold(ctx, strokes, opts = {}, progress = 0, layer = null
     drawFan(ctx, strokes || [], folds, lag, lerpCamera(from, to, easeOutCubic(lag)), {
       alpha,
       ink: inkColor(lag),
+      mirror,
     });
   }
   drawFan(ctx, strokes || [], folds, p, lerpCamera(from, to, easeOutCubic(p)), {
     alpha: 1,
     ink: inkColor(p),
+    mirror,
   });
   ctx.restore();
 }
@@ -478,7 +487,7 @@ export function renderFinal(ctx, strokes, opts = {}) {
   const folds = resolveFolds(opts);
   const size = resolveSize(ctx, opts);
   const cam = finalCamera(size);
-  const matrices = expandMatrices(folds, true);
+  const matrices = expandMatrices(folds, resolveMirror(opts));
   ctx.save();
   paintBackground(ctx, size);
   ctx.lineCap = 'round';

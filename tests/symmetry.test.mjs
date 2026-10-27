@@ -16,8 +16,8 @@ import {
   renderFolded,
   renderUnfold,
   renderFinal,
-} from '../js/symmetry.v8.js';
-import { buildSVG } from '../js/export.v8.js';
+} from '../js/symmetry.v9.js';
+import { buildSVG } from '../js/export.v9.js';
 
 const CENTER = { x: 0.5, y: 0.5 };
 const AXIS = -Math.PI / 2;
@@ -1256,3 +1256,29 @@ test('buildSVG：[cut, draw] 输入下 draw 的 <path> 仍排在 cut 之前', ()
   assert.ok(svg.lastIndexOf('stroke="#FFFFFF"') < svg.indexOf('stroke="#E9EBE8"'), '所有 draw 都排在所有 cut 之前');
 });
 
+
+test('renderFinal：mirror=false 时只画 n 份旋转副本', () => {
+  const folds = 6;
+  const ctx = createFakeCtx();
+  renderFinal(ctx, STROKES, { folds, size: 400, mirror: false });
+  assert.equal(strokeCalls(ctx).length, folds * STROKES.length, '关掉镜像后是 n 份而非 2n');
+
+  const on = createFakeCtx();
+  renderFinal(on, STROKES, { folds, size: 400, mirror: true });
+  assert.equal(strokeCalls(on).length, 2 * folds * STROKES.length, '开着镜像仍是 2n 份');
+
+  const dflt = createFakeCtx();
+  renderFinal(dflt, STROKES, { folds, size: 400 });
+  assert.equal(strokeCalls(dflt).length, 2 * folds * STROKES.length, '缺省等于开启');
+});
+
+test('buildSVG：mirror=false 时 path 数减半，且与 renderFinal 一致', () => {
+  const folds = 6;
+  const size = 512;
+  const off = buildSVG({ strokes: STROKES, folds, size, mirror: false });
+  const offPaths = [...off.matchAll(/<path /g)].length;
+  const on = buildSVG({ strokes: STROKES, folds, size, mirror: true });
+  const onPaths = [...on.matchAll(/<path /g)].length;
+  assert.equal(offPaths, folds * STROKES.length, '关镜像 = n × 笔迹数');
+  assert.equal(onPaths, 2 * folds * STROKES.length, '开镜像 = 2n × 笔迹数');
+});

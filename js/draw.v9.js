@@ -7,7 +7,7 @@ import {
   renderSectorLayer,
   renderUnfold,
   sectorAngle,
-} from './symmetry.v8.js';
+} from './symmetry.v9.js';
 
 const MIN_POINT_DISTANCE = 0.0015;
 const MAX_UNDO_DEPTH = 100;
@@ -87,6 +87,7 @@ export function createBoard(canvas, opts = {}) {
     folds: initialFolds = DEFAULT_FOLDS,
     width: initialWidth = DEFAULT_WIDTH,
     tool: initialTool = DEFAULT_TOOL,
+    mirror: initialMirror = true,
     onChange = null,
   } = opts;
 
@@ -105,6 +106,7 @@ export function createBoard(canvas, opts = {}) {
   let folds = normalizeFolds(initialFolds);
   let strokeWidth = clampWidth(initialWidth);
   let tool = normalizeTool(initialTool);
+  let mirror = initialMirror !== false;
   let mode = 'folded';
   let progress = 0;
 
@@ -187,12 +189,12 @@ export function createBoard(canvas, opts = {}) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const list = liveStroke ? [...strokes, liveStroke] : strokes;
     if (mode === 'final') {
-      renderFinal(ctx, list, { folds, size });
+      renderFinal(ctx, list, { folds, size, mirror });
       return;
     }
     const camera = foldedCamera(folds, size);
-    if (mode === 'unfolding') renderUnfold(ctx, list, { folds, size, camera }, progress, layer);
-    else renderFolded(ctx, list, { folds, size, camera });
+    if (mode === 'unfolding') renderUnfold(ctx, list, { folds, size, camera, mirror }, progress, layer);
+    else renderFolded(ctx, list, { folds, size, camera, mirror });
   }
 
   function markDirty() {
@@ -366,6 +368,19 @@ export function createBoard(canvas, opts = {}) {
     return tool;
   }
 
+  // 镜像开关：只影响渲染，不改写任何已有笔迹。
+  function setMirror(next) {
+    const value = next !== false;
+    if (value === mirror) return;
+    mirror = value;
+    markDirty();
+    emit();
+  }
+
+  function getMirror() {
+    return mirror;
+  }
+
   function undo() {
     if (undoStack.length === 0) return;
     redoStack.push(strokes);
@@ -413,7 +428,7 @@ export function createBoard(canvas, opts = {}) {
   }
 
   function exportSpec() {
-    return { strokes: getStrokes(), folds };
+    return { strokes: getStrokes(), folds, mirror };
   }
 
   // 展开动画：progress 用 easeOutCubic 从 0 推到 1，收尾切 final 并只 emit 一次。
@@ -490,6 +505,8 @@ export function createBoard(canvas, opts = {}) {
     setWidth,
     setTool,
     getTool,
+    setMirror,
+    getMirror,
     undo,
     redo,
     clear,

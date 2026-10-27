@@ -7,7 +7,7 @@ import {
   renderFinal,
   toPathCommands,
   toSvgPathD,
-} from './symmetry.v8.js';
+} from './symmetry.v9.js';
 
 const DEFAULT_PNG_SIZE = 2048;
 const DEFAULT_SVG_SIZE = 1024;
@@ -37,11 +37,13 @@ function normalizeFolds(folds) {
   return Number.isFinite(value) && value >= 1 ? value : DEFAULT_FOLDS;
 }
 
-function resolveSpec({ strokes, folds, size } = {}, fallbackSize) {
+function resolveSpec({ strokes, folds, size, mirror } = {}, fallbackSize) {
   return {
     strokes: Array.isArray(strokes) ? strokes : [],
     folds: normalizeFolds(folds),
     size: clampSize(size === undefined || size === null ? fallbackSize : size, fallbackSize),
+    // 镜像缺省开启，只有显式 false 才关——与引擎的 resolveMirror 保持一致。
+    mirror: mirror !== false,
   };
 }
 
@@ -99,14 +101,14 @@ function canvasToBlob(canvas) {
   });
 }
 
-export function buildSVG({ strokes, folds, size } = {}) {
-  const spec = resolveSpec({ strokes, folds, size }, DEFAULT_SVG_SIZE);
+export function buildSVG({ strokes, folds, size, mirror } = {}) {
+  const spec = resolveSpec({ strokes, folds, size, mirror }, DEFAULT_SVG_SIZE);
   const { size: side } = spec;
   const half = side / 2;
   const camera = diskCamera(side);
   // 红盘半径 = 0.5 设计半径 × 0.94 = 0.47 × size；clipPath 与红盘必须是同一个圆。
   const diskRadius = round2((DISK_INSET * side) / 2);
-  const matrices = expandMatrices(spec.folds, true);
+  const matrices = expandMatrices(spec.folds, spec.mirror);
   const parts = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${side}" height="${side}" viewBox="0 0 ${side} ${side}">`,
     `<defs><clipPath id="${CLIP_ID}"><circle cx="${half}" cy="${half}" r="${diskRadius}"/></clipPath></defs>`,
@@ -150,21 +152,21 @@ export function buildSVG({ strokes, folds, size } = {}) {
   return parts.join('\n');
 }
 
-export async function exportPNG({ strokes, folds, size = DEFAULT_PNG_SIZE } = {}) {
-  const spec = resolveSpec({ strokes, folds, size }, DEFAULT_PNG_SIZE);
+export async function exportPNG({ strokes, folds, size = DEFAULT_PNG_SIZE, mirror } = {}) {
+  const spec = resolveSpec({ strokes, folds, size, mirror }, DEFAULT_PNG_SIZE);
   const canvas = document.createElement('canvas');
   canvas.width = spec.size;
   canvas.height = spec.size;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('无法创建 2D 画布上下文');
   // renderFinal 自己清屏、铺米白底并画红盘，这里不再重复铺底。
-  renderFinal(ctx, spec.strokes, { folds: spec.folds, size: spec.size });
+  renderFinal(ctx, spec.strokes, { folds: spec.folds, size: spec.size, mirror: spec.mirror });
   const blob = await canvasToBlob(canvas);
   download(blob, fileName(spec.folds, 'png'));
 }
 
-export function exportSVG({ strokes, folds, size = DEFAULT_SVG_SIZE } = {}) {
-  const spec = resolveSpec({ strokes, folds, size }, DEFAULT_SVG_SIZE);
+export function exportSVG({ strokes, folds, size = DEFAULT_SVG_SIZE, mirror } = {}) {
+  const spec = resolveSpec({ strokes, folds, size, mirror }, DEFAULT_SVG_SIZE);
   const svg = buildSVG(spec);
   download(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), fileName(spec.folds, 'svg'));
 }
