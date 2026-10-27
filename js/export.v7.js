@@ -1,12 +1,13 @@
 import {
   DISK_INSET,
+  MAX_FINAL_INK_WIDTH,
   PALETTE,
   expandMatrices,
   isClosedCut,
   renderFinal,
   toPathCommands,
   toSvgPathD,
-} from './symmetry.v6.js';
+} from './symmetry.v7.js';
 
 const DEFAULT_PNG_SIZE = 2048;
 const DEFAULT_SVG_SIZE = 1024;
@@ -123,7 +124,8 @@ export function buildSVG({ strokes, folds, size } = {}) {
       if (commands.length === 0) continue;
       if (commands.length === 1) {
         // 单点的实心圆同样跟着内缩，半径 = width/2 × size × 0.94。
-        const radius = clamp(round2(((stroke.width ?? 0) * side * DISK_INSET) / 2), 0, side);
+        const dotWidth = cutPass ? (stroke.width ?? 0) : Math.min(stroke.width ?? 0, MAX_FINAL_INK_WIDTH);
+        const radius = clamp(round2((dotWidth * side * DISK_INSET) / 2), 0, side);
         for (const matrix of matrices) {
           const dot = projectCommand(commands[0], matrix, camera);
           parts.push(`<circle cx="${dot.x}" cy="${dot.y}" r="${radius}" fill="${color}"/>`);
@@ -131,7 +133,9 @@ export function buildSVG({ strokes, folds, size } = {}) {
         continue;
       }
       // 笔宽与屏幕同源：canvas 里同样由相机缩放，故一并乘 DISK_INSET。
-      const width = clamp(round2((stroke.width ?? 0) * side * DISK_INSET), 0, side);
+      // 与 renderFinal 一致：画笔刻线封顶 0.006，剪刀挖纸保持原宽。
+      const inkWidth = cutPass ? (stroke.width ?? 0) : Math.min(stroke.width ?? 0, MAX_FINAL_INK_WIDTH);
+      const width = clamp(round2(inkWidth * side * DISK_INSET), 0, side);
       // 闭合的剪刀在屏幕上是「填底色 + 描边」，导出照抄：实心底色 + 闭合的 d（末尾 Z）。
       const closed = cutPass && isClosedCut(stroke);
       const fill = closed ? color : 'none';

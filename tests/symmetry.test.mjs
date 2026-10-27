@@ -16,8 +16,8 @@ import {
   renderFolded,
   renderUnfold,
   renderFinal,
-} from '../js/symmetry.v6.js';
-import { buildSVG } from '../js/export.v6.js';
+} from '../js/symmetry.v7.js';
+import { buildSVG } from '../js/export.v7.js';
 
 const CENTER = { x: 0.5, y: 0.5 };
 const AXIS = -Math.PI / 2;
@@ -541,7 +541,32 @@ test('renderFinal：2n 份白色刻线、红盘、无装饰纹', () => {
   renderFinal(dotCtx, dot, { folds: 4, size: 400 });
   assert.equal(dotCtx.count('fill'), 1 + 2 * 4, '红盘 + 2n 个实心圆点');
   assert.equal(dotCtx.count('stroke'), 0);
-  assert.equal(dotCtx.named('arc')[1].args[2], 0.01);
+  // 成品里画笔刻线封顶 0.006：圆点半径随之变成 0.003（原来按 0.02/2=0.01 画，密涂会糊成白块）
+  assert.equal(dotCtx.named('arc')[1].args[2], 0.003);
+});
+
+test('renderFinal：画笔刻线宽度封顶 0.006，剪刀挖纸保持原宽', () => {
+  const thickDraw = [{ width: 0.02, points: [{ x: 0.5, y: 0.3 }, { x: 0.52, y: 0.2 }] }];
+  const thickCut = [{ tool: 'cut', width: 0.02, points: [{ x: 0.5, y: 0.3 }, { x: 0.52, y: 0.2 }] }];
+  const thinDraw = [{ width: 0.004, points: [{ x: 0.5, y: 0.3 }, { x: 0.52, y: 0.2 }] }];
+
+  const a = createFakeCtx();
+  renderFinal(a, thickDraw, { folds: 4, size: 400 });
+  assert.equal(strokeCalls(a)[0].style.lineWidth, 0.006, '粗画笔刻线被压到 0.006');
+
+  const b = createFakeCtx();
+  renderFinal(b, thickCut, { folds: 4, size: 400 });
+  assert.equal(strokeCalls(b)[0].style.lineWidth, 0.02, '剪刀挖纸不吃上限');
+
+  const c = createFakeCtx();
+  renderFinal(c, thinDraw, { folds: 4, size: 400 });
+  assert.equal(strokeCalls(c)[0].style.lineWidth, 0.004, '细画笔不被放大');
+});
+
+test('renderFinal：传 layer 与否不影响成品（层只服务展开动画）', () => {
+  const ctx = createFakeCtx();
+  renderFinal(ctx, STROKES, { folds: 6, size: 400 });
+  assert.ok(ctx.count('stroke') > 0);
 });
 
 test('renderUnfold：拖影层数与 progress 的关系', () => {
@@ -851,12 +876,12 @@ test('buildSVG：红盘与 clipPath 同一圆，path 坐标与 renderFinal 相�
     }
   }
 
-  // 单点笔迹：cx/cy 同样内缩，r = width/2 × size × 0.94。
+  // 单点笔迹：cx/cy 同样内缩；半径吃画笔上限 0.006（与 renderFinal 一致），故 r = 0.006/2 × size × 0.94。
   const dotSvg = buildSVG({ strokes: [{ width: 0.02, points: [{ x: 0.5, y: 0.25 }] }], folds: 4, size });
   const dots = svgCircles(dotSvg);
   assert.equal(dots.length, 2 + 2 * 4, 'clipPath + 红盘 + 2n 个实心圆点');
   for (const [, , r] of dots.slice(2)) {
-    assertClose(r, ((0.02 * size) / 2) * DISK_INSET, '点半径 width/2×size×0.94', 0.01);
+    assertClose(r, ((0.006 * size) / 2) * DISK_INSET, '点半径 0.006/2×size×0.94', 0.01);
   }
   assertClose(dots[2][0], cam[0] * 0.5 + cam[4], '第一个点的 cx 已经内缩', 0.01);
   assertClose(dots[2][1], cam[0] * 0.25 + cam[4], '第一个点的 cy 已经内缩', 0.01);

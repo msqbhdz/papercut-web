@@ -1,11 +1,13 @@
 import {
+  PALETTE,
   clampToSector,
   foldedCamera,
   renderFinal,
   renderFolded,
+  renderSectorLayer,
   renderUnfold,
   sectorAngle,
-} from './symmetry.v6.js';
+} from './symmetry.v7.js';
 
 const MIN_POINT_DISTANCE = 0.0015;
 const MAX_UNDO_DEPTH = 100;
@@ -137,6 +139,38 @@ export function createBoard(canvas, opts = {}) {
     }));
   }
 
+  // 展开动画的性能核心：把折起来的那片纸预渲染成两张位图（金色 / 白色各一张），
+  // 动画期间每帧只做 2n 次 drawImage，不必为每份副本重建上千个矢量路径。失败则回退矢量路径。
+  let layer = null;
+
+  function releaseLayer() {
+    layer = null;
+  }
+
+  function buildLayer() {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+    const rectSize = cssSide();
+    const dpr = globalThis.devicePixelRatio || 1;
+    const side = Math.round(Math.min(1024, Math.max(64, (rectSize > 0 ? rectSize : canvas.width / dpr) * dpr)));
+    const make = (ink) => {
+      const surface = document.createElement('canvas');
+      surface.width = side;
+      surface.height = side;
+      const surfaceCtx = surface.getContext('2d');
+      if (!surfaceCtx) return null;
+      renderSectorLayer(surfaceCtx, strokes, { folds, size: side, scale: side, ink });
+      return surface;
+    };
+    try {
+      const inkFolded = make(PALETTE.inkFolded);
+      const inkCut = make(PALETTE.inkCut);
+      if (!inkFolded) return null;
+      return { inkFolded, inkCut, side };
+    } catch (error) {
+      return null;
+    }
+  }
+
   // 画布按 CSS 像素正方向布局；渲染器自己 save/restore 并叠加相机，所以这里只负责把基准变换设成 DPR。
   function cssSide() {
     if (typeof canvas.getBoundingClientRect !== 'function') return 0;
@@ -157,7 +191,7 @@ export function createBoard(canvas, opts = {}) {
       return;
     }
     const camera = foldedCamera(folds, size);
-    if (mode === 'unfolding') renderUnfold(ctx, list, { folds, size, camera }, progress);
+    if (mode === 'unfolding') renderUnfold(ctx, list, { folds, size, camera }, progress, layer);
     else renderFolded(ctx, list, { folds, size, camera });
   }
 
@@ -407,6 +441,7 @@ export function createBoard(canvas, opts = {}) {
     abortActive();
     if (strokes.length === 0) return false;
     dropFrame();
+    layer = buildLayer();
     mode = 'unfolding';
     progress = 0;
     dirty = false;
@@ -422,6 +457,7 @@ export function createBoard(canvas, opts = {}) {
     if (destroyed) return;
     cancelAnim();
     abortActive();
+    releaseLayer();
     mode = 'folded';
     progress = 0;
     markDirty();
@@ -433,6 +469,7 @@ export function createBoard(canvas, opts = {}) {
     destroyed = true;
     dropFrame();
     cancelAnim();
+    releaseLayer();
     dirty = false;
     abortActive();
     if (observer) observer.disconnect();

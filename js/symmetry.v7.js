@@ -7,6 +7,8 @@
 const TAU = Math.PI * 2;
 const CENTER = { x: 0.5, y: 0.5 };
 const MAX_RADIUS = 0.5;
+// 成品里画笔刻线封顶：太粗会在密集涂画时糊成白块，收细才读得出「刻痕」。
+export const MAX_FINAL_INK_WIDTH = 0.006;
 // 成品态内缩：红盘直径只占画布 94%，四周各留 3% 白边，盘边才不会被画布圆角/边缘切平。
 export const DISK_INSET = 0.94;
 // canvas 的 y 轴向下，正上方因此是 -π/2。
@@ -211,8 +213,12 @@ function mixHex(from, to, t) {
 // 笔迹金色→白色的分界：p < 0.65 一直是金色，最后 35% 才过渡到白色，动画前半段笔迹不发灰。
 const INK_WHITE_START = 0.65;
 
+function inkMix(progress) {
+  return clamp01((progress - INK_WHITE_START) / (1 - INK_WHITE_START));
+}
+
 function inkColor(progress) {
-  return mixHex(PALETTE.inkFolded, PALETTE.inkCut, clamp01((progress - INK_WHITE_START) / (1 - INK_WHITE_START)));
+  return mixHex(PALETTE.inkFolded, PALETTE.inkCut, inkMix(progress));
 }
 
 // 每片纸的变换：Rot(k·Δ·progress)，镜像片再右乘 Reflect(θ0)；progress=0 时镜像片与原片重合。
@@ -318,13 +324,15 @@ export function isClosedCut(stroke) {
 
 // 两遍画：先把所有 draw 按数组相对顺序画完，再把所有 cut 按数组相对顺序统一扣掉。
 // 剪刀是最后才落的遮罩，不是按时序叠上去的一笔——纸被挖走以后，再画的线也落不回那块空地。
-function paintStrokes(ctx, strokes, color) {
+function paintStrokes(ctx, strokes, color, maxWidth = Infinity) {
   for (const cutPass of [false, true]) {
     for (const stroke of strokes) {
       if (isCut(stroke) !== cutPass) continue;
       const commands = toPathCommands(stroke.points);
       if (commands.length === 0) continue;
-      paintStroke(ctx, commands, stroke.width, cutPass ? PALETTE.paperBg : color, cutPass && isClosedCut(stroke));
+      // 只有画笔刻线吃上限；剪刀挖纸必须保持原宽。
+      const width = cutPass ? stroke.width : Math.min(stroke.width, maxWidth);
+      paintStroke(ctx, commands, width, cutPass ? PALETTE.paperBg : color, cutPass && isClosedCut(stroke));
     }
   }
 }
@@ -361,6 +369,60 @@ function paintFan(ctx, strokes, folds, progress, cam, options) {
   ctx.restore();
 }
 
+// 把折起来的那一片纸（红楔形 + 金色笔迹 + 剪刀挖空）预渲染成一张位图，暴露透明。
+// 展开动画每帧只要 drawImage 旋转贴图，不必为 2n 份副本重建矢量路径。
+export function renderSectorLayer(ctx, strokes, opts = {}) {
+  const folds = resolveFolds(opts);
+  const size = resolveSize(ctx, opts);
+  const scale = Number(opts.scale) > 0 ? opts.scale : size;
+  const ink = opts.ink || PALETTE.inkFolded;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, size, size);
+  ctx.transform(scale, 0, 0, scale, 0, 0);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  addWedgePath(ctx, folds);
+  ctx.fillStyle = PALETTE.paper;
+  ctx.fill();
+  ctx.clip();
+  paintStrokes(ctx, strokes || [], ink);
+  ctx.restore();
+}
+
+// 位图版的一帧：每份副本一次 drawImage；金色层与白色层按 inkMix 交叉淡入。
+function paintFanLayer(ctx, folds, layer, progress, cam, options) {
+  const sectors = fanSectors(folds, progress);
+  const white = layer.inkCut;
+  const gold = layer.inkFolded;
+  const mix = inkMix(progress);
+  const under = Math.min(1, progress / UNDER_REVEAL);
+  ctx.save();
+  ctx.transform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
+  for (const sector of sectors) {
+    const alpha = sector.m === 1 ? 1 : under;
+    if (alpha < MIN_ALPHA) continue;
+    ctx.save();
+    ctx.globalAlpha = options.alpha * alpha;
+    ctx.transform(sector.args[0], sector.args[1], sector.args[2], sector.args[3], sector.args[4], sector.args[5]);
+    if (mix < 1 && gold) {
+      ctx.save();
+      ctx.globalAlpha = options.alpha * alpha * (1 - mix);
+      ctx.drawImage(gold, 0, 0, gold.width, gold.height, 0, 0, 1, 1);
+      ctx.restore();
+    }
+    if (mix > 0 && white) {
+      ctx.save();
+      ctx.globalAlpha = options.alpha * alpha * mix;
+      ctx.drawImage(white, 0, 0, white.width, white.height, 0, 0, 1, 1);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 export function renderFolded(ctx, strokes, opts = {}) {
   const folds = resolveFolds(opts);
   const size = resolveSize(ctx, opts);
@@ -379,12 +441,16 @@ export function renderFolded(ctx, strokes, opts = {}) {
   ctx.restore();
 }
 
-export function renderUnfold(ctx, strokes, opts = {}, progress = 0) {
+export function renderUnfold(ctx, strokes, opts = {}, progress = 0, layer = null) {
   const folds = resolveFolds(opts);
   const size = resolveSize(ctx, opts);
   const p = clamp01(progress);
   const from = opts.camera || foldedCamera(folds, size);
   const to = finalCamera(size);
+  const bitmapped = layer && layer.inkFolded;
+  const drawFan = bitmapped
+    ? (fanCtx, fanStrokes, fanFolds, fanProgress, cam, fanOptions) => paintFanLayer(fanCtx, fanFolds, layer, fanProgress, cam, fanOptions)
+    : paintFan;
   ctx.save();
   paintBackground(ctx, size);
   ctx.lineCap = 'round';
@@ -393,12 +459,12 @@ export function renderUnfold(ctx, strokes, opts = {}, progress = 0) {
     const lag = p - TRAIL_LAGS[i];
     const alpha = TRAIL_ALPHAS[i] * (1 - p);
     if (lag < 0 || alpha <= MIN_ALPHA) continue;
-    paintFan(ctx, strokes || [], folds, lag, lerpCamera(from, to, easeOutCubic(lag)), {
+    drawFan(ctx, strokes || [], folds, lag, lerpCamera(from, to, easeOutCubic(lag)), {
       alpha,
       ink: inkColor(lag),
     });
   }
-  paintFan(ctx, strokes || [], folds, p, lerpCamera(from, to, easeOutCubic(p)), {
+  drawFan(ctx, strokes || [], folds, p, lerpCamera(from, to, easeOutCubic(p)), {
     alpha: 1,
     ink: inkColor(p),
   });
@@ -423,7 +489,7 @@ export function renderFinal(ctx, strokes, opts = {}) {
   for (const matrix of matrices) {
     ctx.save();
     ctx.transform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f);
-    paintStrokes(ctx, strokes || [], PALETTE.inkCut);
+    paintStrokes(ctx, strokes || [], PALETTE.inkCut, MAX_FINAL_INK_WIDTH);
     ctx.restore();
   }
   ctx.restore();
