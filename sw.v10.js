@@ -1,71 +1,34 @@
-'use strict';
-
-// 经典脚本：不使用 import/export，避免在无构建的项目里引入模块边界。
-const CACHE = 'papercut-v13';
-const ENTRY = './index.html';
-
-// 与 index.html 的引用（含其 import 图）逐一对应；部署在 /papercut-web/ 子路径下，全部相对。
-const PRECACHE = [
-  './',
-  './index.html',
-  './style.v4.css',
-  './manifest.json',
-  './js/symmetry.v8.js',
-  './js/draw.v8.js',
-  './js/export.v8.js',
-  './js/main.v10.js',
-  './icons/icon.svg',
-  './icons/icon-180.png',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/icon-maskable-512.png'
-];
-
-self.addEventListener('install', (event) => {
-  event.waitUntil((async () => {
-    const cache = await caches.open(CACHE);
-    await cache.addAll(PRECACHE);
-    await self.skipWaiting();
-  })());
+// 旧发布标记的 Service Worker 墓碑。
+// 目的：打破「旧 SW 缓存旧页面 → 旧页面注册旧 SW URL（已 404）→ 永远无法更新」的死锁。
+// 它只做三件事：清空所有缓存、自我注销、把已打开的页面拉回网络重新加载。
+self.addEventListener('install', () => {
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    const keys = await caches.keys();
-    const stale = keys.filter((key) => key !== CACHE);
-    await Promise.all(stale.map((key) => caches.delete(key)));
-    await self.clients.claim();
-  })());
-});
-
-async function fetchAndFill(cache, request) {
-  const response = await fetch(request);
-  // 只回填成功的基本响应，避免把 opaque/错误页写进缓存。
-  if (response && response.ok && response.type === 'basic') {
-    await cache.put(request, response.clone());
-  }
-  return response;
-}
-
-self.addEventListener('fetch', (event) => {
-  const request = event.request;
-  if (request.method !== 'GET') return;
-  const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
-
-  event.respondWith((async () => {
-    const cache = await caches.open(CACHE);
-    const cached = await cache.match(request);
-    if (cached) return cached;
-
     try {
-      return await fetchAndFill(cache, request);
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
     } catch (error) {
-      if (request.mode === 'navigate') {
-        const fallback = await cache.match(ENTRY);
-        if (fallback) return fallback;
+      // 清缓存失败也继续注销，否则会把用户永久锁在旧版本。
+    }
+    try {
+      await self.registration.unregister();
+    } catch (error) {
+      // 忽略：下次导航仍会走网络。
+    }
+    try {
+      const clients = await self.clients.matchAll({ type: 'window' });
+      for (const client of clients) {
+        try {
+          await client.navigate(client.url);
+        } catch (error) {
+          // 跨源或已关闭的页面无法导航，忽略。
+        }
       }
-      return new Response('', { status: 504, statusText: 'Offline' });
+    } catch (error) {
+      // 忽略。
     }
   })());
 });
