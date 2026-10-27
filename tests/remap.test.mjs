@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { __remapPointsForTest } from '../js/draw.v7.js';
+import { __remapPointsForTest } from '../js/draw.v8.js';
 
 const CENTER = { x: 0.5, y: 0.5 };
 const AXIS = -Math.PI / 2;

@@ -16,8 +16,8 @@ import {
   renderFolded,
   renderUnfold,
   renderFinal,
-} from '../js/symmetry.v7.js';
-import { buildSVG } from '../js/export.v7.js';
+} from '../js/symmetry.v8.js';
+import { buildSVG } from '../js/export.v8.js';
 
 const CENTER = { x: 0.5, y: 0.5 };
 const AXIS = -Math.PI / 2;
@@ -1054,15 +1054,15 @@ test('isClosedCut：tool / 点数 / 首尾距离 / 阈值四道判据', () => {
   assert.equal(isClosedCut(null), false, '空笔迹');
   assert.equal(isClosedCut({ tool: 'cut', width: 0.008 }), false, '没有 points');
 
-  // 阈值就是 max(0.035, width × 2.5)：两端各让 0.002，稳稳落在阈内/阈外。
+  // 阈值固定 0.035（不随笔宽放大）：两端各让 0.002，稳稳落在阈内/阈外。
   for (const width of [0.004, 0.016, 0.02]) {
-    const gap = Math.max(0.035, width * 2.5);
+    const gap = 0.035;
     assert.equal(isClosedCut(loopStroke({ gap: gap - 0.002, width })), true, '阈内 width=' + width);
     assert.equal(isClosedCut(loopStroke({ gap: gap + 0.002, width })), false, '阈外 width=' + width);
   }
-  // 同一 0.04 缺口：细笔吃 0.035 下限算开口，粗笔阈值抬到 0.05 仍算闭合。
-  assert.equal(isClosedCut(loopStroke({ gap: 0.04, width: 0.004 })), false, '细笔阈值取下限 0.035');
-  assert.equal(isClosedCut(loopStroke({ gap: 0.04, width: 0.02 })), true, '粗笔阈值抬到 0.05');
+  // 同一 0.04 缺口：粗细笔都算开口——粗笔不再享受放宽的阈值（这正是用户要的）。
+  assert.equal(isClosedCut(loopStroke({ gap: 0.04, width: 0.004 })), false, '细笔 0.04 开口');
+  assert.equal(isClosedCut(loopStroke({ gap: 0.04, width: 0.02 })), false, '粗笔也按 0.035，不再放宽');
 });
 
 test('renderFolded：闭合 cut 多一次 paperBg 的 fill，开口 cut 没有', () => {

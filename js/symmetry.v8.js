@@ -304,9 +304,12 @@ function isCut(stroke) {
   return Boolean(stroke) && stroke.tool === 'cut';
 }
 
-// 闭环判定的容差：细笔吃 0.035 的下限，粗笔按笔宽放大，剪口外沿才不会留一截缝。
-function closedGap(width) {
-  return Math.max(0.035, width * 2.5);
+// 闭环判定的容差：固定 0.035（归一化，1.0 = 画布边长；382px 画布上约 13px）。
+// 早期曾按笔宽放大到 2.5×，结果是笔一粗就「一碰起点就闭合」，用户难以控制，故改为固定值。
+const CLOSED_GAP = 0.035;
+
+function closedGap() {
+  return CLOSED_GAP;
 }
 
 // 闭环剪刀：首尾回到起点附近就整块挖掉，没绕回来的仍只挖一条带。
