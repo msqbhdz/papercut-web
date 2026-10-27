@@ -1,5 +1,6 @@
-// v4 折叠-展开模型：纯几何 + 三态渲染。顶层零 DOM 依赖，只用 Math 与标准 Canvas 2D。
-// 笔迹分两种工具：draw 画金线（刻线，纸还在），cut 用底色挖掉一条带（露出底盘）。
+// v5 折叠-展开模型：纯几何 + 三态渲染。顶层零 DOM 依赖，只用 Math 与标准 Canvas 2D。
+// 笔迹分两种工具：draw 画金线（刻线，纸还在），cut 用底色挖掉一条带（露出底盘）；
+// cut 绕回起点成闭环时改挖整块，那一笔就等于「剪下来」。
 
 const TAU = Math.PI * 2;
 const CENTER = { x: 0.5, y: 0.5 };
@@ -250,7 +251,9 @@ function tracePath(ctx, commands) {
   }
 }
 
-function paintStroke(ctx, commands, width, color) {
+// closed=true：先用同一颜色把圈内整块填掉，再沿闭合路径描一圈。
+// 填充让圈内塌成底色，描边让剪口边缘落在笔迹外沿、首尾接缝看不出来。
+function paintStroke(ctx, commands, width, color, closed = false) {
   if (commands.length === 1) {
     ctx.beginPath();
     ctx.arc(commands[0].x, commands[0].y, width / 2, 0, TAU);
@@ -260,6 +263,11 @@ function paintStroke(ctx, commands, width, color) {
   }
   ctx.beginPath();
   tracePath(ctx, commands);
+  if (closed) {
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
   ctx.lineWidth = width;
   ctx.strokeStyle = color;
   ctx.stroke();
@@ -288,12 +296,31 @@ function isCut(stroke) {
   return Boolean(stroke) && stroke.tool === 'cut';
 }
 
+// 闭环判定的容差：细笔吃 0.035 的下限，粗笔按笔宽放大，剪口外沿才不会留一截缝。
+function closedGap(width) {
+  return Math.max(0.035, width * 2.5);
+}
+
+// 闭环剪刀：首尾回到起点附近就整块挖掉，没绕回来的仍只挖一条带。
+// 判定留在渲染层而不是 draw.js，正在画的那一笔因此也实时生效。
+export function isClosedCut(stroke) {
+  if (!isCut(stroke)) return false;
+  const points = Array.isArray(stroke.points) ? stroke.points : [];
+  if (points.length < 4) return false;
+  const first = points[0];
+  const last = points[points.length - 1];
+  const width = Number(stroke.width);
+  const gap = closedGap(Number.isFinite(width) ? width : 0);
+  return Math.hypot(last.x - first.x, last.y - first.y) <= gap;
+}
+
 // 按数组顺序逐条画：后画的剪刀因此能盖住先画的金线（剪掉时连纸上的线一起去掉）。
 function paintStrokes(ctx, strokes, color) {
   for (const stroke of strokes) {
     const commands = toPathCommands(stroke.points);
     if (commands.length === 0) continue;
-    paintStroke(ctx, commands, stroke.width, isCut(stroke) ? PALETTE.paperBg : color);
+    const cut = isCut(stroke);
+    paintStroke(ctx, commands, stroke.width, cut ? PALETTE.paperBg : color, cut && isClosedCut(stroke));
   }
 }
 

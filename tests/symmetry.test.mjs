@@ -12,11 +12,12 @@ import {
   toPathCommands,
   toSvgPathD,
   foldedCamera,
+  isClosedCut,
   renderFolded,
   renderUnfold,
   renderFinal,
-} from '../js/symmetry.v4.js';
-import { buildSVG } from '../js/export.v4.js';
+} from '../js/symmetry.v5.js';
+import { buildSVG } from '../js/export.v5.js';
 
 const CENTER = { x: 0.5, y: 0.5 };
 const AXIS = -Math.PI / 2;
@@ -990,4 +991,168 @@ test('buildSVG：混合笔迹按 tool 取色，且输出顺序与输入一致', 
   const dotSvg = buildSVG({ strokes: [{ tool: 'cut', width: 0.02, points: [{ x: 0.5, y: 0.25 }] }], folds: 4, size });
   assert.equal(count(dotSvg, 'fill="#E9EBE8"'), 1 + 2 * 4, '背景 rect + 2n 个挖出的圆点');
 });
+// ——— 闭合剪刀：首尾回到起点附近就把圈内整块挖掉，没绕回来的仍只挖一条带 ———
+// gap 是末点相对首点在 x 上的偏移，也就是首尾欧氏距离。
+function loopPoints(gap = 0) {
+  const first = { x: 0.5, y: 0.32 };
+  return [
+    first,
+    { x: 0.58, y: 0.36 },
+    { x: 0.54, y: 0.44 },
+    { x: first.x + gap, y: first.y },
+  ];
+}
+
+function loopStroke({ gap = 0, width = 0.008, tool = 'cut' } = {}) {
+  return { tool, width, points: loopPoints(gap) };
+}
+
+const DRAW_STROKE = { tool: 'draw', width: 0.008, points: [{ x: 0.5, y: 0.2 }, { x: 0.55, y: 0.3 }] };
+
+function svgPathTags(svg) {
+  return [...svg.matchAll(/<path [^>]*\/>/g)].map((match) => match[0]);
+}
+
+function svgPathD(tag) {
+  const match = tag.match(/\sd="([^"]+)"/);
+  assert.ok(match, 'path 必须带 d: ' + tag);
+  return match[1];
+}
+
+test('isClosedCut：tool / 点数 / 首尾距离 / 阈值四道判据', () => {
+  assert.equal(isClosedCut(loopStroke({ gap: 0 })), true, '首尾重合的剪刀 = 闭环');
+  assert.equal(isClosedCut(loopStroke({ gap: 0, tool: 'draw' })), false, '同样四点但 tool=draw');
+  assert.equal(isClosedCut(loopStroke({ gap: 0.2 })), false, '开口 0.2 没绕回来');
+  // 3 点即使首尾重合也不成环：圈里没有面积可言。
+  const three = [{ x: 0.5, y: 0.3 }, { x: 0.56, y: 0.36 }, { x: 0.5, y: 0.3 }];
+  assert.equal(isClosedCut({ tool: 'cut', width: 0.008, points: three }), false, '只有 3 点');
+  assert.equal(isClosedCut(null), false, '空笔迹');
+  assert.equal(isClosedCut({ tool: 'cut', width: 0.008 }), false, '没有 points');
+
+  // 阈值就是 max(0.035, width × 2.5)：两端各让 0.002，稳稳落在阈内/阈外。
+  for (const width of [0.004, 0.016, 0.02]) {
+    const gap = Math.max(0.035, width * 2.5);
+    assert.equal(isClosedCut(loopStroke({ gap: gap - 0.002, width })), true, '阈内 width=' + width);
+    assert.equal(isClosedCut(loopStroke({ gap: gap + 0.002, width })), false, '阈外 width=' + width);
+  }
+  // 同一 0.04 缺口：细笔吃 0.035 下限算开口，粗笔阈值抬到 0.05 仍算闭合。
+  assert.equal(isClosedCut(loopStroke({ gap: 0.04, width: 0.004 })), false, '细笔阈值取下限 0.035');
+  assert.equal(isClosedCut(loopStroke({ gap: 0.04, width: 0.02 })), true, '粗笔阈值抬到 0.05');
+});
+
+test('renderFolded：闭合 cut 多一次 paperBg 的 fill，开口 cut 没有', () => {
+  const folds = 6;
+  const size = 366;
+
+  const closed = createFakeCtx();
+  renderFolded(closed, [loopStroke()], { folds, size });
+  const closedFills = closed.named('fill');
+  assert.equal(closedFills.length, 2, '红楔形本体 1 次 + 圈内整块 1 次');
+  assert.equal(closedFills[0].style.fillStyle, PALETTE.paper, '先铺红纸');
+  assert.equal(closedFills[1].style.fillStyle, PALETTE.paperBg, '圈内塌成底色');
+  assert.equal(closed.count('stroke'), 1, '闭合笔迹仍然描一遍');
+  for (const call of strokeCalls(closed)) {
+    assert.equal(call.style.strokeStyle, PALETTE.paperBg, '剪口与填充同一底色');
+    assert.equal(call.style.lineWidth, 0.008, '描边宽度 = 笔宽');
+    assert.equal(call.style.lineCap, 'round');
+    assert.equal(call.style.lineJoin, 'round');
+  }
+
+  // 填的是笔迹自己那条路径（1 个子路径、闭合、没有弧），不是楔形。
+  const holeFillIndex = closed.calls.findIndex(
+    (call) => call.name === 'fill' && call.style.fillStyle === PALETTE.paperBg,
+  );
+  const holePath = pathBeforeFill(closed, holeFillIndex);
+  assert.equal(holePath.moveTo, 1, '一条子路径');
+  assert.equal(holePath.closePath, 1, '填之前先闭合');
+  assert.equal(holePath.arc, 0, '填的不是楔形');
+  const holeStrokeIndex = closed.calls.findIndex((call) => call.name === 'stroke');
+  assert.ok(holeStrokeIndex > holeFillIndex, '同一笔迹先 fill 后 stroke');
+
+  // 开口剪刀：行为与改动前完全一致，只有楔形本体那 1 次 fill。
+  const open = createFakeCtx();
+  renderFolded(open, [loopStroke({ gap: 0.2 })], { folds, size });
+  assert.equal(open.named('fill').length, 1, '开口剪刀没有额外 fill');
+  assert.equal(open.named('fill')[0].style.fillStyle, PALETTE.paper, '只剩红楔形本体那一次');
+  assert.equal(open.count('closePath'), 1, '开口笔迹不额外闭合');
+  assert.equal(open.count('stroke'), 1);
+  assert.equal(strokeCalls(open)[0].style.strokeStyle, PALETTE.paperBg, '开口仍然只挖一条带');
+
+  // 绘制顺序仍由数组决定：后画的 draw 盖在先画的闭合剪影上。
+  const ordered = createFakeCtx();
+  renderFolded(ordered, [loopStroke(), DRAW_STROKE], { folds, size });
+  assert.deepEqual(strokeColors(ordered), [PALETTE.paperBg, PALETTE.inkFolded], '数组顺序就是绘制顺序');
+  const cutIndex = ordered.calls.findIndex(
+    (call) => call.name === 'stroke' && call.style.strokeStyle === PALETTE.paperBg,
+  );
+  const drawIndex = ordered.calls.findIndex(
+    (call) => call.name === 'stroke' && call.style.strokeStyle === PALETTE.inkFolded,
+  );
+  assert.ok(cutIndex < drawIndex, '剪刀先画');
+});
+
+test('renderFinal：闭合 cut 的整块填充是 paperBg 且 2n 份，draw 仍是 inkCut', () => {
+  const folds = 6;
+  const size = 400;
+  const ctx = createFakeCtx();
+  renderFinal(ctx, [loopStroke(), DRAW_STROKE], { folds, size });
+
+  const fills = ctx.named('fill');
+  assert.equal(fills[0].style.fillStyle, PALETTE.paper, '红盘先铺');
+  const holes = fills.slice(1);
+  assert.equal(holes.length, 2 * folds, '每个扇区拷贝各填一块');
+  for (const call of holes) assert.equal(call.style.fillStyle, PALETTE.paperBg, '整块都是底色');
+
+  const painted = strokeCalls(ctx);
+  assert.equal(painted.length, 2 * folds * 2, '两条笔迹 × 2n 份');
+  assert.equal(painted.filter((call) => call.style.strokeStyle === PALETTE.paperBg).length, 2 * folds, '剪刀 2n 份');
+  assert.equal(painted.filter((call) => call.style.strokeStyle === PALETTE.inkCut).length, 2 * folds, 'draw 仍是白刻线');
+
+  const firstHole = ctx.calls.findIndex(
+    (call) => call.name === 'fill' && call.style.fillStyle === PALETTE.paperBg,
+  );
+  const firstStroke = ctx.calls.findIndex((call) => call.name === 'stroke');
+  assert.ok(firstHole >= 0 && firstHole < firstStroke, '整块填充先于它自己的描边');
+
+  // 开口剪刀在成品态也不产生任何额外填充。
+  const openCtx = createFakeCtx();
+  renderFinal(openCtx, [loopStroke({ gap: 0.2 })], { folds, size });
+  assert.equal(openCtx.named('fill').length, 1, '只有红盘那一次');
+  assert.equal(openCtx.named('fill')[0].style.fillStyle, PALETTE.paper);
+  assert.equal(openCtx.count('stroke'), 2 * folds, '开口仍是 2n 条描边');
+});
+
+test('buildSVG：闭合 cut 是实心底色 path 且 d 以 Z 结束，开口仍是 fill="none"', () => {
+  const size = 512;
+  const folds = 6;
+
+  const closedSvg = buildSVG({ strokes: [loopStroke()], folds, size });
+  const closedPaths = svgPathTags(closedSvg);
+  assert.equal(closedPaths.length, 2 * folds, '2n 份闭合剪影');
+  for (const tag of closedPaths) {
+    assert.match(tag, /fill="#E9EBE8"/, '实心底色: ' + tag);
+    assert.match(tag, /stroke="#E9EBE8"/, '同色描边: ' + tag);
+    const d = svgPathD(tag);
+    assert.ok(d.endsWith(' Z'), 'd 以 Z 收尾: ' + d.slice(-12));
+    assert.equal(d.split('Z').length - 1, 1, '只闭合一次');
+  }
+  const d0 = svgPathD(closedPaths[0]);
+  assert.equal((d0.match(/M/g) || []).length, 1, '一个 M');
+  assert.equal((d0.match(/Q/g) || []).length, 2, '两个 Q');
+  assert.equal((d0.match(/L/g) || []).length, 1, '一个 L');
+  assert.ok(
+    closedSvg.indexOf('<g clip-path="url(#papercut-disk)">') < closedSvg.indexOf('<path '),
+    '闭合填充仍在红盘 clipPath 内',
+  );
+
+  const openSvg = buildSVG({ strokes: [loopStroke({ gap: 0.2 })], folds, size });
+  const openPaths = svgPathTags(openSvg);
+  assert.equal(openPaths.length, 2 * folds, '2n 条开口带');
+  for (const tag of openPaths) {
+    assert.match(tag, /fill="none"/, '开口不填充: ' + tag);
+    assert.match(tag, /stroke="#E9EBE8"/);
+    assert.ok(!svgPathD(tag).endsWith('Z'), '开口路径不闭合');
+  }
+});
+
 
