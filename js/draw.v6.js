@@ -5,7 +5,7 @@ import {
   renderFolded,
   renderUnfold,
   sectorAngle,
-} from './symmetry.v5.js';
+} from './symmetry.v6.js';
 
 const MIN_POINT_DISTANCE = 0.0015;
 const MAX_UNDO_DEPTH = 100;

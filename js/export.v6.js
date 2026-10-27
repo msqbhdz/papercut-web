@@ -6,7 +6,7 @@ import {
   renderFinal,
   toPathCommands,
   toSvgPathD,
-} from './symmetry.v5.js';
+} from './symmetry.v6.js';
 
 const DEFAULT_PNG_SIZE = 2048;
 const DEFAULT_SVG_SIZE = 1024;
@@ -113,31 +113,33 @@ export function buildSVG({ strokes, folds, size } = {}) {
     `<circle cx="${half}" cy="${half}" r="${diskRadius}" fill="${PALETTE.paper}"/>`,
     `<g clip-path="url(#${CLIP_ID})">`,
   ];
-  // 笔迹按数组顺序输出：SVG 后画的元素压在上面，剪刀因此能盖住先画的白刻线。
-  // 剪刀用底色 = 与 PNG 里 renderFinal 挖出的洞同一颜色。
-  for (const stroke of spec.strokes) {
-    const cut = stroke?.tool === 'cut';
-    const color = cut ? PALETTE.paperBg : PALETTE.inkCut;
-    const commands = toPathCommands(stroke?.points ?? []);
-    if (commands.length === 0) continue;
-    if (commands.length === 1) {
-      // 单点的实心圆同样跟着内缩，半径 = width/2 × size × 0.94。
-      const radius = clamp(round2(((stroke.width ?? 0) * side * DISK_INSET) / 2), 0, side);
-      for (const matrix of matrices) {
-        const dot = projectCommand(commands[0], matrix, camera);
-        parts.push(`<circle cx="${dot.x}" cy="${dot.y}" r="${radius}" fill="${color}"/>`);
+  // 两遍输出：先全部 draw、再全部 cut，各自保持数组原顺序——与 PNG 里 paintStrokes 的两遍一致。
+  // SVG 后画的元素压在上面，剪刀因此永远最后生效；剪刀用底色 = 与 renderFinal 挖出的洞同一颜色。
+  for (const cutPass of [false, true]) {
+    for (const stroke of spec.strokes) {
+      if ((stroke?.tool === 'cut') !== cutPass) continue;
+      const color = cutPass ? PALETTE.paperBg : PALETTE.inkCut;
+      const commands = toPathCommands(stroke?.points ?? []);
+      if (commands.length === 0) continue;
+      if (commands.length === 1) {
+        // 单点的实心圆同样跟着内缩，半径 = width/2 × size × 0.94。
+        const radius = clamp(round2(((stroke.width ?? 0) * side * DISK_INSET) / 2), 0, side);
+        for (const matrix of matrices) {
+          const dot = projectCommand(commands[0], matrix, camera);
+          parts.push(`<circle cx="${dot.x}" cy="${dot.y}" r="${radius}" fill="${color}"/>`);
+        }
+        continue;
       }
-      continue;
-    }
-    // 笔宽与屏幕同源：canvas 里同样由相机缩放，故一并乘 DISK_INSET。
-    const width = clamp(round2((stroke.width ?? 0) * side * DISK_INSET), 0, side);
-    // 闭合的剪刀在屏幕上是「填底色 + 描边」，导出照抄：实心底色 + 闭合的 d（末尾 Z）。
-    const closed = cut && isClosedCut(stroke);
-    const fill = closed ? color : 'none';
-    const attrs = `fill="${fill}" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"`;
-    for (const matrix of matrices) {
-      const d = toSvgPathD(commands.map((command) => projectCommand(command, matrix, camera)));
-      parts.push(`<path ${attrs} d="${closed ? d + ' Z' : d}"/>`);
+      // 笔宽与屏幕同源：canvas 里同样由相机缩放，故一并乘 DISK_INSET。
+      const width = clamp(round2((stroke.width ?? 0) * side * DISK_INSET), 0, side);
+      // 闭合的剪刀在屏幕上是「填底色 + 描边」，导出照抄：实心底色 + 闭合的 d（末尾 Z）。
+      const closed = cutPass && isClosedCut(stroke);
+      const fill = closed ? color : 'none';
+      const attrs = `fill="${fill}" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"`;
+      for (const matrix of matrices) {
+        const d = toSvgPathD(commands.map((command) => projectCommand(command, matrix, camera)));
+        parts.push(`<path ${attrs} d="${closed ? d + ' Z' : d}"/>`);
+      }
     }
   }
   parts.push('</g>', '</svg>');

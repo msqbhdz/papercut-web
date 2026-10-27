@@ -1,6 +1,8 @@
 // v5 折叠-展开模型：纯几何 + 三态渲染。顶层零 DOM 依赖，只用 Math 与标准 Canvas 2D。
 // 笔迹分两种工具：draw 画金线（刻线，纸还在），cut 用底色挖掉一条带（露出底盘）；
 // cut 绕回起点成闭环时改挖整块，那一笔就等于「剪下来」。
+// 「剪」永远最后生效：红纸 + 全部 draw 先构造成一张完整的纸，所有 cut 再统一当遮罩扣掉，
+// 因此先剪后画也不会把颜色涂在已经剪掉的空气里（见 paintStrokes 的两遍）。
 
 const TAU = Math.PI * 2;
 const CENTER = { x: 0.5, y: 0.5 };
@@ -314,13 +316,16 @@ export function isClosedCut(stroke) {
   return Math.hypot(last.x - first.x, last.y - first.y) <= gap;
 }
 
-// 按数组顺序逐条画：后画的剪刀因此能盖住先画的金线（剪掉时连纸上的线一起去掉）。
+// 两遍画：先把所有 draw 按数组相对顺序画完，再把所有 cut 按数组相对顺序统一扣掉。
+// 剪刀是最后才落的遮罩，不是按时序叠上去的一笔——纸被挖走以后，再画的线也落不回那块空地。
 function paintStrokes(ctx, strokes, color) {
-  for (const stroke of strokes) {
-    const commands = toPathCommands(stroke.points);
-    if (commands.length === 0) continue;
-    const cut = isCut(stroke);
-    paintStroke(ctx, commands, stroke.width, cut ? PALETTE.paperBg : color, cut && isClosedCut(stroke));
+  for (const cutPass of [false, true]) {
+    for (const stroke of strokes) {
+      if (isCut(stroke) !== cutPass) continue;
+      const commands = toPathCommands(stroke.points);
+      if (commands.length === 0) continue;
+      paintStroke(ctx, commands, stroke.width, cutPass ? PALETTE.paperBg : color, cutPass && isClosedCut(stroke));
+    }
   }
 }
 

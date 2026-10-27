@@ -16,8 +16,8 @@ import {
   renderFolded,
   renderUnfold,
   renderFinal,
-} from '../js/symmetry.v5.js';
-import { buildSVG } from '../js/export.v5.js';
+} from '../js/symmetry.v6.js';
+import { buildSVG } from '../js/export.v6.js';
 
 const CENTER = { x: 0.5, y: 0.5 };
 const AXIS = -Math.PI / 2;
@@ -863,7 +863,7 @@ test('buildSVG：红盘与 clipPath 同一圆，path 坐标与 renderFinal 相�
 });
 
 // 剪刀笔迹：tool==='cut' 用底色把纸挖掉（露出底盘），draw 照旧上金/白。
-// 数组顺序就是绘制顺序——后画的剪刀因此盖得住先画的金线。
+// 绘制分两遍：先全部 draw、再全部 cut——剪刀在数组里排第几都不影响它最后生效。
 const MIXED_STROKES = [
   { tool: 'draw', width: 0.008, points: [{ x: 0.5, y: 0.2 }, { x: 0.55, y: 0.3 }, { x: 0.48, y: 0.38 }] },
   { tool: 'cut', width: 0.012, points: [{ x: 0.44, y: 0.22 }, { x: 0.5, y: 0.3 }] },
@@ -876,7 +876,7 @@ function strokeColors(ctx) {
   return strokeCalls(ctx).map((call) => call.style.strokeStyle);
 }
 
-test('renderFolded：cut 笔迹用 paperBg 挖白，并按笔迹顺序画在 draw 之后', () => {
+test('renderFolded：cut 笔迹用 paperBg 挖白，且永远画在 draw 之后', () => {
   const folds = 6;
   const size = 366;
   const ctx = createFakeCtx();
@@ -900,10 +900,10 @@ test('renderFolded：cut 笔迹用 paperBg 挖白，并按笔迹顺序画在 dra
   assert.ok(drawIndex >= 0 && cutIndex >= 0, '两种笔迹都真的被描了');
   assert.ok(cutIndex > drawIndex, '剪刀后画才能盖住先画的金线');
 
-  // 顺序由输入决定，而不是按工具分组：换一下数组顺序，绘制顺序跟着换。
+  // 剪刀被挪到数组最前面也一样最后画：两遍绘制与数组顺序无关。
   const swapped = createFakeCtx();
   renderFolded(swapped, [MIXED_STROKES[1], MIXED_STROKES[0]], { folds, size });
-  assert.deepEqual(strokeColors(swapped), [PALETTE.paperBg, PALETTE.inkFolded], '笔迹顺序决定绘制顺序');
+  assert.deepEqual(strokeColors(swapped), [PALETTE.inkFolded, PALETTE.paperBg], '剪刀挪到最前，仍然后画');
 
   // 单点笔迹（实心圆点）同样按 tool 取色：fill[0] 是红楔形本体。
   const dotCtx = createFakeCtx();
@@ -969,7 +969,7 @@ test('renderUnfold：cut 笔迹在 p=0/1 恒为 paperBg，draw 仍从金过渡�
   assert.equal(mainCut, PALETTE.paperBg, 'cut 不参与插值');
 });
 
-test('buildSVG：混合笔迹按 tool 取色，且输出顺序与输入一致', () => {
+test('buildSVG：混合笔迹按 tool 取色，draw 永远排在 cut 前面', () => {
   const size = 512;
   const folds = 6;
   const count = (text, needle) => text.split(needle).length - 1;
@@ -983,9 +983,9 @@ test('buildSVG：混合笔迹按 tool 取色，且输出顺序与输入一致', 
     '所有笔迹都在红盘 clipPath 内',
   );
 
-  // 顺序随输入：把剪刀放前面，输出的两种颜色也跟着调头。
+  // 剪刀放前面也不调头：两组颜色仍按「先 draw 后 cut」排。
   const swapped = buildSVG({ strokes: [MIXED_STROKES[1], MIXED_STROKES[0]], folds, size });
-  assert.ok(swapped.indexOf('stroke="#E9EBE8"') < swapped.indexOf('stroke="#FFFFFF"'), '后画的 draw 排在后面');
+  assert.ok(swapped.indexOf('stroke="#FFFFFF"') < swapped.indexOf('stroke="#E9EBE8"'), 'cut 仍排在 draw 后面');
 
   // 单点：<circle> 同样按 tool 取色（背景 rect 也吃 fill="#E9EBE8"，故 1 + 2n）。
   const dotSvg = buildSVG({ strokes: [{ tool: 'cut', width: 0.02, points: [{ x: 0.5, y: 0.25 }] }], folds: 4, size });
@@ -1078,17 +1078,17 @@ test('renderFolded：闭合 cut 多一次 paperBg 的 fill，开口 cut 没有',
   assert.equal(open.count('stroke'), 1);
   assert.equal(strokeCalls(open)[0].style.strokeStyle, PALETTE.paperBg, '开口仍然只挖一条带');
 
-  // 绘制顺序仍由数组决定：后画的 draw 盖在先画的闭合剪影上。
+  // 闭合剪影排在数组前面也一样最后扣：金色先落，剪口再连它一起挖掉。
   const ordered = createFakeCtx();
   renderFolded(ordered, [loopStroke(), DRAW_STROKE], { folds, size });
-  assert.deepEqual(strokeColors(ordered), [PALETTE.paperBg, PALETTE.inkFolded], '数组顺序就是绘制顺序');
+  assert.deepEqual(strokeColors(ordered), [PALETTE.inkFolded, PALETTE.paperBg], '剪刀被挪到最后');
   const cutIndex = ordered.calls.findIndex(
     (call) => call.name === 'stroke' && call.style.strokeStyle === PALETTE.paperBg,
   );
   const drawIndex = ordered.calls.findIndex(
     (call) => call.name === 'stroke' && call.style.strokeStyle === PALETTE.inkFolded,
   );
-  assert.ok(cutIndex < drawIndex, '剪刀先画');
+  assert.ok(cutIndex > drawIndex, '剪刀后画');
 });
 
 test('renderFinal：闭合 cut 的整块填充是 paperBg 且 2n 份，draw 仍是 inkCut', () => {
@@ -1111,8 +1111,10 @@ test('renderFinal：闭合 cut 的整块填充是 paperBg 且 2n 份，draw 仍�
   const firstHole = ctx.calls.findIndex(
     (call) => call.name === 'fill' && call.style.fillStyle === PALETTE.paperBg,
   );
-  const firstStroke = ctx.calls.findIndex((call) => call.name === 'stroke');
-  assert.ok(firstHole >= 0 && firstHole < firstStroke, '整块填充先于它自己的描边');
+  const firstHoleStroke = ctx.calls.findIndex(
+    (call) => call.name === 'stroke' && call.style.strokeStyle === PALETTE.paperBg,
+  );
+  assert.ok(firstHole >= 0 && firstHoleStroke > firstHole, '整块填充先于它自己的描边');
 
   // 开口剪刀在成品态也不产生任何额外填充。
   const openCtx = createFakeCtx();
@@ -1155,4 +1157,77 @@ test('buildSVG：闭合 cut 是实心底色 path 且 d 以 Z 结束，开口仍�
   }
 });
 
+
+
+// ——— 剪刀必须最后生效：先剪后画时，金色也不能涂回已经挖空的区域 ———
+// 语义是「红纸 + 全部 draw 先构成一张纸，全部 cut 最后统一当遮罩扣掉」，与数组顺序无关。
+test('renderFolded：[cut, draw] 输入下 stroke 序列仍是「先金色、后底色」', () => {
+  const folds = 6;
+  const size = 366;
+  const cutFirst = [
+    { tool: 'cut', width: 0.012, points: [{ x: 0.44, y: 0.22 }, { x: 0.5, y: 0.3 }] },
+    { tool: 'draw', width: 0.008, points: [{ x: 0.5, y: 0.2 }, { x: 0.55, y: 0.3 }, { x: 0.48, y: 0.38 }] },
+  ];
+  const ctx = createFakeCtx();
+  renderFolded(ctx, cutFirst, { folds, size });
+
+  const strokes = strokeCalls(ctx);
+  assert.equal(strokes.length, 2, '两条笔迹各描一次');
+  assert.deepEqual(
+    strokes.map((call) => [call.style.strokeStyle, call.style.lineWidth]),
+    [[PALETTE.inkFolded, 0.008], [PALETTE.paperBg, 0.012]],
+    '完整 stroke 序列：先 draw 的金色，再 cut 的底色',
+  );
+  const goldIndex = ctx.calls.findIndex(
+    (call) => call.name === 'stroke' && call.style.strokeStyle === PALETTE.inkFolded,
+  );
+  const bgIndex = ctx.calls.findIndex(
+    (call) => call.name === 'stroke' && call.style.strokeStyle === PALETTE.paperBg,
+  );
+  assert.ok(goldIndex >= 0 && bgIndex > goldIndex, '剪刀虽然排在数组第 0 位，仍然最后落');
+
+  // 成品态共用同一个 paintStrokes：每份拷贝内部也仍是「先 draw 后 cut」。
+  const finalCtx = createFakeCtx();
+  renderFinal(finalCtx, cutFirst, { folds, size: 400 });
+  assert.deepEqual(strokeColors(finalCtx).slice(0, 2), [PALETTE.inkCut, PALETTE.paperBg], '成品态同样先白刻线后底色');
+});
+
+test('renderFolded：[draw, cut, draw] 两次金色都排在唯一一次底色之前', () => {
+  const strokes = [
+    { tool: 'draw', width: 0.008, points: [{ x: 0.5, y: 0.2 }, { x: 0.55, y: 0.3 }] },
+    { tool: 'cut', width: 0.012, points: [{ x: 0.44, y: 0.22 }, { x: 0.5, y: 0.3 }] },
+    { tool: 'draw', width: 0.01, points: [{ x: 0.46, y: 0.26 }, { x: 0.52, y: 0.34 }] },
+  ];
+  const ctx = createFakeCtx();
+  renderFolded(ctx, strokes, { folds: 6, size: 366 });
+
+  const colors = strokeColors(ctx);
+  assert.deepEqual(colors, [PALETTE.inkFolded, PALETTE.inkFolded, PALETTE.paperBg], '两金在前、一底在后');
+  assert.equal(colors.filter((color) => color === PALETTE.inkFolded).length, 2, '两次金色');
+  assert.equal(colors.filter((color) => color === PALETTE.paperBg).length, 1, '唯一一次底色');
+  assert.ok(colors.lastIndexOf(PALETTE.inkFolded) < colors.indexOf(PALETTE.paperBg), '两次金色都在底色之前');
+  // 两条 draw 之间仍保持数组相对顺序：0.008 先画，0.01 后画，剪刀仍是 0.012。
+  assert.deepEqual(
+    strokeCalls(ctx).map((call) => call.style.lineWidth),
+    [0.008, 0.01, 0.012],
+    'draw 内部相对顺序不变',
+  );
+});
+
+test('buildSVG：[cut, draw] 输入下 draw 的 <path> 仍排在 cut 之前', () => {
+  const size = 512;
+  const folds = 6;
+  const cutFirst = [
+    { tool: 'cut', width: 0.012, points: [{ x: 0.44, y: 0.22 }, { x: 0.5, y: 0.3 }] },
+    { tool: 'draw', width: 0.008, points: [{ x: 0.5, y: 0.2 }, { x: 0.55, y: 0.3 }] },
+  ];
+  const svg = buildSVG({ strokes: cutFirst, folds, size });
+
+  const tags = svgPathTags(svg);
+  assert.equal(tags.length, 2 * folds * cutFirst.length, '两条笔迹 × 2n 份');
+  assert.equal(tags.filter((tag) => tag.includes('stroke="#FFFFFF"')).length, 2 * folds, 'draw → 2n 条白刻线');
+  assert.equal(tags.filter((tag) => tag.includes('stroke="#E9EBE8"')).length, 2 * folds, 'cut → 2n 条挖白');
+  assert.ok(svg.indexOf('stroke="#FFFFFF"') < svg.indexOf('stroke="#E9EBE8"'), 'draw 出现在 cut 之前');
+  assert.ok(svg.lastIndexOf('stroke="#FFFFFF"') < svg.indexOf('stroke="#E9EBE8"'), '所有 draw 都排在所有 cut 之前');
+});
 
