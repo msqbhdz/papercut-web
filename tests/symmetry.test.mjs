@@ -16,8 +16,8 @@ import {
   renderFolded,
   renderUnfold,
   renderFinal,
-} from '../js/symmetry.v9.js';
-import { buildSVG } from '../js/export.v9.js';
+} from '../js/symmetry.v10.js';
+import { buildSVG } from '../js/export.v10.js';
 
 const CENTER = { x: 0.5, y: 0.5 };
 const AXIS = -Math.PI / 2;
@@ -1281,4 +1281,34 @@ test('buildSVG：mirror=false 时 path 数减半，且与 renderFinal 一致', (
   const onPaths = [...on.matchAll(/<path /g)].length;
   assert.equal(offPaths, folds * STROKES.length, '关镜像 = n × 笔迹数');
   assert.equal(onPaths, 2 * folds * STROKES.length, '开镜像 = 2n × 笔迹数');
+});
+
+test('isClosedCut：大圈按「缺口 / 笔迹长度」比例判定（手画大图案也能闭合）', () => {
+  // 半径 0.2 的圆，周长 ≈ 1.26；缺口 0.06 只占 4.8% —— 人眼里就是闭合。
+  const ring = (gapDeg) => {
+    const points = [];
+    const n = 40;
+    for (let i = 0; i < n; i += 1) {
+      const a = ((360 - gapDeg) * i) / (n - 1) * Math.PI / 180 - Math.PI / 2;
+      points.push({ x: 0.5 + 0.2 * Math.cos(a), y: 0.5 + 0.2 * Math.sin(a) });
+    }
+    return { tool: 'cut', width: 0.008, points };
+  };
+  assert.equal(isClosedCut(ring(2)), true, '几乎完全闭合');
+  // 18° 缺口 → 弦长 0.0626（382px 画布上约 24px），旧的「固定 13px」规则必然判开；
+  // 但它只占周长 5.2%，人眼里就是闭合的 —— 这正是本次改进覆盖的场景。
+  assert.equal(isClosedCut(ring(18)), true, '24px 缺口的大圈也算闭合');
+  assert.equal(isClosedCut(ring(150)), false, '缺口占周长 53%，不算闭合');
+
+  // 半圆弧：首尾相距很远，不能误判为闭合。
+  const arc = [];
+  for (let i = 0; i <= 30; i += 1) {
+    const a = Math.PI * 0.5 + (Math.PI * i) / 30;
+    arc.push({ x: 0.5 + 0.2 * Math.cos(a), y: 0.5 + 0.2 * Math.sin(a) });
+  }
+  assert.equal(isClosedCut({ tool: 'cut', width: 0.008, points: arc }), false, '半圆弧不是闭环');
+
+  // 绝对容差仍生效：很小的圈，缺口 0.03 直接算闭合。
+  const tiny = [{ x: 0.5, y: 0.5 }, { x: 0.54, y: 0.52 }, { x: 0.5, y: 0.53 }, { x: 0.5, y: 0.53 - 0.03 }];
+  assert.equal(isClosedCut({ tool: 'cut', width: 0.008, points: tiny }), true, '小圈走绝对容差');
 });

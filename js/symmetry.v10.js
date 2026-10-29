@@ -310,15 +310,24 @@ function isCut(stroke) {
   return Boolean(stroke) && stroke.tool === 'cut';
 }
 
-// 闭环判定的容差：固定 0.035（归一化，1.0 = 画布边长；382px 画布上约 13px）。
-// 早期曾按笔宽放大到 2.5×，结果是笔一粗就「一碰起点就闭合」，用户难以控制，故改为固定值。
+// 闭环判定分两级：
+//  ① 绝对容差 0.035（归一化，1.0 = 画布边长；382px 画布上约 13px）—— 小圈够用；
+//  ② 相对容差：首尾缺口 ≤ 笔迹总长的 8% —— 手画大图案几乎不可能精确落回 13px 内，
+//     但只要「缺口 / 整条长度」很小，人眼里它就是闭合的，按闭合处理。
+//  早期版本用 2.5×笔宽做容差，笔一粗就「一碰起点就闭合」，已废弃。
 const CLOSED_GAP = 0.035;
+const CLOSED_LOOP_RATIO = 0.08;
+const MIN_LOOP_LENGTH = 0.12;
 
-function closedGap() {
-  return CLOSED_GAP;
+function pathLength(points) {
+  let total = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+  }
+  return total;
 }
 
-// 闭环剪刀：首尾回到起点附近就整块挖掉，没绕回来的仍只挖一条带。
+// 闭环剪刀：绕回起点就整块挖掉，没绕回来的仍只挖一条带。
 // 判定留在渲染层而不是 draw.js，正在画的那一笔因此也实时生效。
 export function isClosedCut(stroke) {
   if (!isCut(stroke)) return false;
@@ -326,9 +335,10 @@ export function isClosedCut(stroke) {
   if (points.length < 4) return false;
   const first = points[0];
   const last = points[points.length - 1];
-  const width = Number(stroke.width);
-  const gap = closedGap(Number.isFinite(width) ? width : 0);
-  return Math.hypot(last.x - first.x, last.y - first.y) <= gap;
+  const gap = Math.hypot(last.x - first.x, last.y - first.y);
+  if (gap <= CLOSED_GAP) return true;
+  const length = pathLength(points);
+  return length >= MIN_LOOP_LENGTH && gap <= length * CLOSED_LOOP_RATIO;
 }
 
 // 两遍画：先把所有 draw 按数组相对顺序画完，再把所有 cut 按数组相对顺序统一扣掉。

@@ -7,7 +7,7 @@ import {
   renderSectorLayer,
   renderUnfold,
   sectorAngle,
-} from './symmetry.v9.js';
+} from './symmetry.v10.js';
 
 const MIN_POINT_DISTANCE = 0.0015;
 const MAX_UNDO_DEPTH = 100;
